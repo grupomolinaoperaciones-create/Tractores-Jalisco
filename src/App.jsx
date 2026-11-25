@@ -9,12 +9,13 @@ const ROLES = {
   consulta: { password: 'jalisco-consulta26', label: 'Consulta',      color: '#378ADD' },
 }
 const ROL_NAV = {
-  admin:    ['dashboard','diesel','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  campo:    ['diesel','actividades','mtto','autorizaciones'],
-  consulta: ['dashboard','reporte','analisis'],
+  admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
+  campo:    ['diesel','vales','taller','actividades','mtto','autorizaciones'],
+  consulta: ['dashboard','reporte','vales','taller','analisis'],
 }
 
 function LoginScreen({onLogin}){
+  const [nombreIn,setNombreIn]=useState(()=>{try{return localStorage.getItem('flotilla_nombre')||''}catch(e){return ''}})
   const [pass,setPass]=useState('')
   const [error,setError]=useState('')
   const [loading,setLoading]=useState(false)
@@ -22,7 +23,8 @@ function LoginScreen({onLogin}){
     setLoading(true)
     setTimeout(()=>{
       const rol=Object.entries(ROLES).find(([,v])=>v.password===pass)?.[0]
-      if(rol){localStorage.setItem('flotilla_rol',rol);onLogin(rol);setError('')}
+      if(rol&&nombreIn.trim()){localStorage.setItem('flotilla_rol',rol);localStorage.setItem('flotilla_nombre',nombreIn.trim());onLogin(rol,nombreIn.trim());setError('')}
+      else if(rol)setError('Escribe tu nombre para continuar.')
       else setError('Contraseña incorrecta. Intenta de nuevo.')
       setLoading(false)
     },400)
@@ -36,14 +38,19 @@ function LoginScreen({onLogin}){
           <p style={{fontSize:13,color:'#5F5E5A',margin:0}}>Grupo Molina · Tractores Jalisco</p>
         </div>
         <div style={{marginBottom:16}}>
+          <label style={{display:'block',fontSize:12,fontWeight:600,color:'#5F5E5A',marginBottom:8}}>Tu nombre</label>
+          <input type="text" placeholder="Nombre y apellido" value={nombreIn} onChange={e=>setNombreIn(e.target.value)}
+            style={{width:'100%',padding:'12px 14px',borderRadius:10,border:'1.5px solid #E5E5E5',fontSize:14,outline:'none',boxSizing:'border-box'}} autoFocus/>
+        </div>
+        <div style={{marginBottom:16}}>
           <label style={{display:'block',fontSize:12,fontWeight:600,color:'#5F5E5A',marginBottom:8}}>Contraseña de acceso</label>
           <input type="password" placeholder="Ingresa tu contraseña..." value={pass}
             onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleLogin()}
-            style={{width:'100%',padding:'12px 14px',borderRadius:10,border:'1.5px solid #E5E5E5',fontSize:14,outline:'none',boxSizing:'border-box'}} autoFocus/>
+            style={{width:'100%',padding:'12px 14px',borderRadius:10,border:'1.5px solid #E5E5E5',fontSize:14,outline:'none',boxSizing:'border-box'}}/>
         </div>
         {error&&<div style={{background:'#FCEBEB',border:'1px solid #F09595',borderRadius:8,padding:'8px 12px',marginBottom:14,fontSize:13,color:'#A32D2D'}}>{error}</div>}
-        <button onClick={handleLogin} disabled={loading||!pass}
-          style={{width:'100%',padding:'12px',borderRadius:10,background:'#1D9E75',color:'#fff',border:'none',fontSize:14,fontWeight:600,cursor:'pointer',opacity:loading||!pass?0.6:1}}>
+        <button onClick={handleLogin} disabled={loading||!pass||!nombreIn.trim()}
+          style={{width:'100%',padding:'12px',borderRadius:10,background:'#1D9E75',color:'#fff',border:'none',fontSize:14,fontWeight:600,cursor:'pointer',opacity:loading||!pass||!nombreIn.trim()?0.6:1}}>
           {loading?'Verificando...':'Ingresar'}
         </button>
         <p style={{marginTop:16,textAlign:'center',fontSize:11,color:'#bbb'}}>Contacta al administrador si olvidaste tu contraseña.</p>
@@ -65,6 +72,8 @@ const ESTADOS_AUTORIZACION = ['Pendiente','Autorizado','Rechazado']
 const NAV = [
   {id:'dashboard',    label:'Dashboard',       emoji:'📊'},
   {id:'diesel',       label:'Diesel',          emoji:'⛽'},
+  {id:'vales',        label:'Vales',           emoji:'🎫'},
+  {id:'taller',       label:'Programación Taller', emoji:'🛠️'},
   {id:'presupuesto',  label:'Presupuesto',     emoji:'📋'},
   {id:'reporte',      label:'Reporte',         emoji:'📑'},
   {id:'actividades',  label:'Actividades',     emoji:'📝'},
@@ -452,14 +461,23 @@ function ReporteDiesel({diesel,tractores}){
 }
 
 /* ── Diesel ── */
-function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,puedeEditar=true}){
+function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,puedeEditar=true,vales=[],setVales,nombre='',valeSel=null,setValeSel}){
+  const hoyStr=()=>new Date().toISOString().split('T')[0]
+  const formVacio=()=>({fecha:hoyStr(),tractor_id:'',campo:'',actividad:'',litros:'',horas:'',hectareas:'',operador:'',semana:'',turno:'DIA',odometro_desp_ini:'',odometro_desp_fin:'',horometro_ini:'',horometro_fin:'',vale_id:''})
   const [showForm,setShowForm]=useState(false)
   const [saving,setSaving]=useState(false)
   const [filterCampo,setFilterCampo]=useState('Todos')
   const [filterTractor,setFilterTractor]=useState('Todos')
-  const [form,setForm]=useState({fecha:new Date().toISOString().split('T')[0],tractor_id:'',campo:'',actividad:'',litros:'',horas:'',hectareas:'',operador:'',semana:'',turno:'DIA'})
+  const [form,setForm]=useState(formVacio())
+  const [cerrar,setCerrar]=useState(null)   // registro al que se le captura horómetro final
+  const [cerrarVal,setCerrarVal]=useState('')
+  const [ahora,setAhora]=useState(Date.now())
+  useEffect(()=>{const t=setInterval(()=>setAhora(Date.now()),60000);return()=>clearInterval(t)},[])
 
-  // Open form preselected when coming from QR scan
+  const valesVigentes=useMemo(()=>vales.filter(v=>v.estado==='Vigente'&&new Date(v.vence).getTime()>ahora),[vales,ahora])
+  const valeForm=form.vale_id?vales.find(v=>String(v.id)===String(form.vale_id)):null
+
+  // Abrir formulario preseleccionado al escanear QR
   useEffect(()=>{
     if(qrTractorId&&tractores.length>0){
       const t=tractores.find(x=>x.id===qrTractorId)
@@ -469,6 +487,32 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
       }
     }
   },[qrTractorId,tractores])
+
+  // Abrir formulario con un vale elegido desde el módulo Vales
+  useEffect(()=>{
+    if(valeSel&&vales.length>0){
+      const v=vales.find(x=>x.id===valeSel)
+      if(v){
+        const t=tractores.find(x=>x.id===v.tractor_id)
+        setForm({...formVacio(),vale_id:String(v.id),tractor_id:v.tractor_id,campo:t?.campo||'',operador:t?.operador||'',litros:String(v.litros_autorizados)})
+        setShowForm(true)
+      }
+      if(setValeSel)setValeSel(null)
+    }
+  },[valeSel,vales])
+
+  const elegirVale=(id)=>{
+    if(!id){setForm(f=>({...f,vale_id:''}));return}
+    const v=vales.find(x=>String(x.id)===String(id)); if(!v)return
+    const t=tractores.find(x=>x.id===v.tractor_id)
+    setForm(f=>({...f,vale_id:String(v.id),tractor_id:v.tractor_id,campo:t?.campo||f.campo,operador:t?.operador||f.operador,litros:String(v.litros_autorizados)}))
+  }
+
+  // Cálculos de odómetro / horómetro
+  const difOdo=form.odometro_desp_ini!==''&&form.odometro_desp_fin!==''?Number(form.odometro_desp_fin)-Number(form.odometro_desp_ini):null
+  const horasCalc=form.horometro_ini!==''&&form.horometro_fin!==''?Math.round((Number(form.horometro_fin)-Number(form.horometro_ini))*10)/10:null
+  const horasEfectivas=horasCalc!=null&&horasCalc>=0?horasCalc:(form.horas!==''?Number(form.horas):null)
+  const descuadre=difOdo!=null&&difOdo>=0&&form.litros!==''&&Math.abs(Number(form.litros)-difOdo)>Math.max(1,difOdo*0.02)
 
   // Presupuesto check
   const alertaPresupuesto=useMemo(()=>{
@@ -492,24 +536,73 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
 
   const handleSubmit=async()=>{
     if(!form.tractor_id||!form.litros){alert('Tractor y litros son obligatorios');return}
+    if(form.odometro_desp_ini===''||form.odometro_desp_fin===''){alert('Captura el odómetro de la máquina despachadora al inicio y al final de la carga');return}
+    if(Number(form.odometro_desp_fin)<Number(form.odometro_desp_ini)){alert('El odómetro final de la despachadora no puede ser menor al inicial');return}
+    if(form.horometro_ini===''){alert('Captura el horómetro inicial de la jornada');return}
+    if(form.horometro_fin!==''&&Number(form.horometro_fin)<Number(form.horometro_ini)){alert('El horómetro final no puede ser menor al inicial');return}
+
+    // Vale: validar y reservar (una persona lo genera, otra lo ejecuta)
+    let vale=null
+    if(form.vale_id){
+      vale=vales.find(v=>String(v.id)===String(form.vale_id))
+      if(!vale){alert('No se encontró el vale seleccionado');return}
+      if(vale.estado!=='Vigente'||new Date(vale.vence).getTime()<=Date.now()){alert(`El vale ${folioVale(vale.id)} ya no está vigente`);return}
+      if(vale.tractor_id!==form.tractor_id){alert(`El vale ${folioVale(vale.id)} es para el tractor ${vale.tractor_id}`);return}
+      if(mismaPersona(vale.generado_por,nombre)){alert(`Generaste el vale ${folioVale(vale.id)}. Debe ejecutarlo otra persona.`);return}
+    }
     setSaving(true)
-    const row={...form,litros:+form.litros,horas:+form.horas||null,hectareas:+form.hectareas||null,semana:+form.semana||null}
+    if(vale){
+      const {data:claim,error:e1}=await supabase.from('vales_diesel').update({estado:'Ejecutado',ejecutado_por:nombre,fecha_ejecucion:new Date().toISOString(),litros_cargados:+form.litros}).eq('id',vale.id).eq('estado','Vigente').select()
+      if(e1||!claim||claim.length===0){alert('No se pudo ejecutar el vale: '+(e1?e1.message:'ya fue utilizado o cancelado por otra persona.'));setSaving(false);return}
+      vale={...vale,...claim[0]}
+    }
+    const num=v=>v===''||v==null?null:Number(v)
+    const row={
+      fecha:form.fecha,tractor_id:form.tractor_id,campo:form.campo,actividad:form.actividad,turno:form.turno,operador:form.operador,
+      litros:+form.litros,horas:horasEfectivas,hectareas:+form.hectareas||null,semana:+form.semana||null,
+      odometro_desp_ini:num(form.odometro_desp_ini),odometro_desp_fin:num(form.odometro_desp_fin),
+      horometro_ini:num(form.horometro_ini),horometro_fin:num(form.horometro_fin),
+      vale_id:vale?vale.id:null,cargado_por:nombre
+    }
     const {data,error}=await supabase.from('diesel_registros').insert([row]).select()
-    if(error){alert('Error: '+error.message)}
-    else{setDiesel(d=>[data[0],...d]);setShowForm(false);setForm({fecha:new Date().toISOString().split('T')[0],tractor_id:'',campo:'',actividad:'',litros:'',horas:'',hectareas:'',operador:'',semana:'',turno:'DIA'})}
+    if(error){
+      if(vale)await supabase.from('vales_diesel').update({estado:'Vigente',ejecutado_por:null,fecha_ejecucion:null,litros_cargados:null}).eq('id',vale.id)
+      alert('Error: '+error.message)
+    }else{
+      if(vale){
+        await supabase.from('vales_diesel').update({diesel_id:data[0].id}).eq('id',vale.id)
+        if(setVales)setVales(vs=>vs.map(v=>v.id===vale.id?{...vale,diesel_id:data[0].id}:v))
+      }
+      setDiesel(d=>[data[0],...d]);setShowForm(false);setForm(formVacio())
+    }
     setSaving(false)
   }
-  const handleDelete=async(id)=>{
-    if(!confirm('¿Eliminar este registro?'))return
-    await supabase.from('diesel_registros').delete().eq('id',id)
-    setDiesel(d=>d.filter(r=>r.id!==id))
+  const handleDelete=async(r)=>{
+    if(!confirm(r.vale_id?'Este registro ejecutó un vale. Al eliminarlo, el vale quedará marcado como Cancelado. ¿Continuar?':'¿Eliminar este registro?'))return
+    await supabase.from('diesel_registros').delete().eq('id',r.id)
+    setDiesel(d=>d.filter(x=>x.id!==r.id))
+    if(r.vale_id){
+      const patch={estado:'Cancelado',cancelado_por:nombre,motivo_cancelacion:'Registro de diesel eliminado'}
+      await supabase.from('vales_diesel').update(patch).eq('id',r.vale_id)
+      if(setVales)setVales(vs=>vs.map(v=>v.id===r.vale_id?{...v,...patch}:v))
+    }
+  }
+  const cerrarJornada=async()=>{
+    const fin=Number(cerrarVal)
+    if(cerrarVal===''||isNaN(fin)||fin<Number(cerrar.horometro_ini)){alert('El horómetro final debe ser mayor o igual al inicial ('+cerrar.horometro_ini+')');return}
+    const horas=Math.round((fin-Number(cerrar.horometro_ini))*10)/10
+    const {error}=await supabase.from('diesel_registros').update({horometro_fin:fin,horas}).eq('id',cerrar.id)
+    if(error){alert('Error: '+error.message);return}
+    setDiesel(d=>d.map(x=>x.id===cerrar.id?{...x,horometro_fin:fin,horas}:x))
+    setCerrar(null);setCerrarVal('')
   }
   const ids=[...new Set(tractores.map(t=>t.id))].sort()
   const rows=diesel.filter(r=>(filterCampo==='Todos'||r.campo===filterCampo)&&(filterTractor==='Todos'||r.tractor_id===filterTractor))
+  const sinVales=vales.length===0
   return <div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
       <h2 style={{fontSize:18,fontWeight:600,margin:0}}>Registro de diesel</h2>
-      {puedeEditar&&<Btn onClick={()=>setShowForm(true)} color="#1D9E75">+ Nuevo registro</Btn>}
+      {puedeEditar&&<Btn onClick={()=>{setForm(formVacio());setShowForm(true)}} color="#1D9E75">+ Nuevo registro</Btn>}
     </div>
     <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
       <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'7px 12px'}}>
@@ -524,35 +617,50 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
     <div style={{overflowX:'auto'}}>
       <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
         <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>
-          {['Fecha','Tractor','Campo','Actividad','Litros','Horas','Hect.','Lts/Hr','Lts/Ha','Operador',''].map(h=><th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',fontSize:12,whiteSpace:'nowrap'}}>{h}</th>)}
+          {['Fecha','Tractor','Campo','Actividad','Litros','Odóm. despachadora','Horómetro','Horas','Hect.','Lts/Hr','Lts/Ha','Vale','Operador',''].map(h=><th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',fontSize:12,whiteSpace:'nowrap'}}>{h}</th>)}
         </tr></thead>
         <tbody>
           {rows.map(r=>{
             const lhr=r.horas>0?(r.litros/r.horas).toFixed(1):'-'
             const lha=r.hectareas>0?(r.litros/r.hectareas).toFixed(1):'-'
+            const abierta=r.horometro_ini!=null&&r.horometro_fin==null
             return <tr key={r.id} style={{borderBottom:'0.5px solid var(--border)'}}>
               <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>{r.fecha}</td>
               <td style={{padding:'8px 10px',fontWeight:600}}>{r.tractor_id}</td>
               <td style={{padding:'8px 10px'}}><Badge color="info">{r.campo}</Badge></td>
               <td style={{padding:'8px 10px'}}>{r.actividad}</td>
               <td style={{padding:'8px 10px',fontWeight:600,color:'#1D9E75'}}>{r.litros}</td>
+              <td style={{padding:'8px 10px',whiteSpace:'nowrap',fontSize:12}}>{r.odometro_desp_ini!=null?`${r.odometro_desp_ini} → ${r.odometro_desp_fin}`:'-'}</td>
+              <td style={{padding:'8px 10px',whiteSpace:'nowrap',fontSize:12}}>{r.horometro_ini!=null?`${r.horometro_ini} → ${r.horometro_fin??'…'}`:'-'}{abierta&&puedeEditar&&<> <button onClick={()=>{setCerrar(r);setCerrarVal('')}} style={{background:'#FAEEDA',color:'#854F0B',border:'none',borderRadius:4,fontSize:11,padding:'1px 6px',cursor:'pointer'}}>Cerrar jornada</button></>}</td>
               <td style={{padding:'8px 10px'}}>{r.horas||'-'}</td>
               <td style={{padding:'8px 10px'}}>{r.hectareas||'-'}</td>
               <td style={{padding:'8px 10px',color:'#378ADD',fontWeight:500}}>{lhr}</td>
               <td style={{padding:'8px 10px',color:'#534AB7',fontWeight:500}}>{lha}</td>
+              <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>{r.vale_id?<Badge color="purple">{folioVale(r.vale_id)}</Badge>:'-'}</td>
               <td style={{padding:'8px 10px',color:'var(--text2)',fontSize:12}}>{r.operador}</td>
-              <td style={{padding:'8px 10px'}}>{puedeEditar&&<button onClick={()=>handleDelete(r.id)} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:16}}>🗑</button>}</td>
+              <td style={{padding:'8px 10px'}}>{puedeEditar&&<button onClick={()=>handleDelete(r)} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:16}}>🗑</button>}</td>
             </tr>
           })}
         </tbody>
       </table>
     </div>}
     {showForm&&<Modal title="Nuevo registro de diesel" onClose={()=>setShowForm(false)}>
+      {!sinVales&&<div style={{background:'#EEEDFE',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
+        <Field label="🎫 Cargar con vale (opcional)">
+          <select value={form.vale_id} onChange={e=>elegirVale(e.target.value)}>
+            <option value="">Sin vale</option>
+            {valesVigentes.map(v=><option key={v.id} value={v.id}>{folioVale(v.id)} · {v.tractor_id} · {v.litros_autorizados} L · vence {fmtFechaHora(v.vence)}</option>)}
+          </select>
+        </Field>
+        {valeForm&&<p style={{margin:0,fontSize:12,color:'#3C3489'}}>Generado por <strong>{valeForm.generado_por}</strong> · Autoriza {valeForm.litros_autorizados} L{valeForm.motivo?` · ${valeForm.motivo}`:''}.
+          {mismaPersona(valeForm.generado_por,nombre)&&<span style={{color:'#A32D2D',fontWeight:600}}> Tú generaste este vale: debe ejecutarlo otra persona.</span>}
+          {Number(form.litros)>Number(valeForm.litros_autorizados)&&<span style={{color:'#A32D2D',fontWeight:600}}> Los litros exceden lo autorizado.</span>}</p>}
+      </div>}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
         <Field label="Fecha"><input type="date" value={form.fecha} onChange={e=>setForm(f=>({...f,fecha:e.target.value}))}/></Field>
         <Field label="Semana #"><input type="number" placeholder="19" value={form.semana} onChange={e=>setForm(f=>({...f,semana:e.target.value}))}/></Field>
         <Field label="Tractor">
-          <select value={form.tractor_id} onChange={e=>{const t=tractores.find(x=>x.id===e.target.value);setForm(f=>({...f,tractor_id:e.target.value,campo:t?.campo||f.campo,operador:t?.operador||f.operador}))}}>
+          <select disabled={!!form.vale_id} value={form.tractor_id} onChange={e=>{const t=tractores.find(x=>x.id===e.target.value);setForm(f=>({...f,tractor_id:e.target.value,campo:t?.campo||f.campo,operador:t?.operador||f.operador}))}}>
             <option value="">Seleccionar...</option>
             {ids.map(t=><option key={t} value={t}>{t}</option>)}
           </select>
@@ -574,21 +682,48 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
             <option>DIA</option><option>NOCHE</option>
           </select>
         </Field>
-        <Field label="Litros diesel *"><input type="number" placeholder="0" value={form.litros} onChange={e=>setForm(f=>({...f,litros:e.target.value}))}/></Field>
-        <Field label="Horas trabajadas"><input type="number" step="0.1" placeholder="0.0" value={form.horas} onChange={e=>setForm(f=>({...f,horas:e.target.value}))}/></Field>
+      </div>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px 2px',marginBottom:12}}>
+        <p style={{margin:'0 0 8px',fontSize:12,fontWeight:600,color:'var(--text2)'}}>⛽ Máquina despachadora (esta carga)</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'0 12px'}}>
+          <Field label="Odómetro inicial *"><input type="number" step="0.1" value={form.odometro_desp_ini} onChange={e=>setForm(f=>({...f,odometro_desp_ini:e.target.value}))}/></Field>
+          <Field label="Odómetro final *"><input type="number" step="0.1" value={form.odometro_desp_fin} onChange={e=>setForm(f=>({...f,odometro_desp_fin:e.target.value}))}/></Field>
+          <Field label="Litros diesel *"><input type="number" placeholder="0" value={form.litros} onChange={e=>setForm(f=>({...f,litros:e.target.value}))}/></Field>
+        </div>
+        {difOdo!=null&&<p style={{margin:'-4px 0 10px',fontSize:12,color:difOdo<0?'#A32D2D':'var(--text2)'}}>
+          {difOdo<0?'El odómetro final es menor al inicial.':`El odómetro marca ${difOdo.toFixed(1)} L despachados.`}
+          {difOdo>=0&&form.litros===''&&<> <button onClick={()=>setForm(f=>({...f,litros:String(Math.round(difOdo*10)/10)}))} style={{background:'none',border:'none',color:'#378ADD',cursor:'pointer',fontSize:12,textDecoration:'underline'}}>Usar como litros</button></>}
+          {descuadre&&<span style={{color:'#A32D2D',fontWeight:600}}> Los litros capturados no coinciden con el odómetro.</span>}</p>}
+      </div>
+      <div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px 2px',marginBottom:12}}>
+        <p style={{margin:'0 0 8px',fontSize:12,fontWeight:600,color:'var(--text2)'}}>🕒 Horómetro del tractor (jornada)</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'0 12px'}}>
+          <Field label="Horómetro inicial *"><input type="number" step="0.1" value={form.horometro_ini} onChange={e=>setForm(f=>({...f,horometro_ini:e.target.value}))}/></Field>
+          <Field label="Horómetro final"><input type="number" step="0.1" placeholder="Al cerrar jornada" value={form.horometro_fin} onChange={e=>setForm(f=>({...f,horometro_fin:e.target.value}))}/></Field>
+          <Field label="Horas trabajadas"><input type="number" step="0.1" value={horasCalc!=null&&horasCalc>=0?horasCalc:form.horas} readOnly={horasCalc!=null&&horasCalc>=0} onChange={e=>setForm(f=>({...f,horas:e.target.value}))} placeholder="0.0"/></Field>
+        </div>
+        <p style={{margin:'-4px 0 10px',fontSize:11,color:'var(--text3)'}}>Si aún no termina la jornada, deja el final vacío y ciérralo después desde la tabla.</p>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
         <Field label="Hectáreas"><input type="number" step="0.1" placeholder="0.0" value={form.hectareas} onChange={e=>setForm(f=>({...f,hectareas:e.target.value}))}/></Field>
         <Field label="Operador"><input type="text" placeholder="Nombre del operador" value={form.operador} onChange={e=>setForm(f=>({...f,operador:e.target.value}))}/></Field>
       </div>
       {alertaPresupuesto&&<div style={{background:alertaPresupuesto.tipo==='danger'?'#FCEBEB':'#FAEEDA',border:`1px solid ${alertaPresupuesto.tipo==='danger'?'#F09595':'#E5C17A'}`,borderRadius:8,padding:'10px 12px',marginBottom:12,fontSize:13,color:alertaPresupuesto.tipo==='danger'?'#A32D2D':'#854F0B'}}>{alertaPresupuesto.msg}</div>}
-      {form.litros&&form.horas&&<div style={{background:'var(--bg2)',borderRadius:8,padding:10,marginBottom:12,fontSize:13}}>
+      {form.litros&&horasEfectivas>0&&<div style={{background:'var(--bg2)',borderRadius:8,padding:10,marginBottom:12,fontSize:13}}>
         <strong>Rendimiento calculado:</strong>{' '}
-        <span style={{color:'#378ADD'}}>{(form.litros/form.horas).toFixed(1)} lts/hr</span>
+        <span style={{color:'#378ADD'}}>{(form.litros/horasEfectivas).toFixed(1)} lts/hr</span>
         {form.hectareas>0&&<> · <span style={{color:'#534AB7'}}>{(form.litros/form.hectareas).toFixed(1)} lts/ha</span></>}
       </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:4}}>
         <Btn outline color="#888" onClick={()=>setShowForm(false)}>Cancelar</Btn>
         <Btn onClick={handleSubmit} disabled={saving}>{saving?'Guardando...':'Guardar registro'}</Btn>
       </div>
+    </Modal>}
+    {cerrar&&<Modal title={`Cerrar jornada · ${cerrar.tractor_id}`} onClose={()=>setCerrar(null)}>
+      <p style={{fontSize:12,color:'var(--text2)',margin:'-6px 0 10px'}}>Horómetro inicial: <strong>{cerrar.horometro_ini}</strong> ({cerrar.fecha})</p>
+      <Field label="Horómetro final"><input type="number" step="0.1" value={cerrarVal} onChange={e=>setCerrarVal(e.target.value)} autoFocus/></Field>
+      {cerrarVal!==''&&Number(cerrarVal)>=Number(cerrar.horometro_ini)&&<p style={{fontSize:12,color:'#0F6E56'}}>Horas trabajadas: {(Math.round((Number(cerrarVal)-Number(cerrar.horometro_ini))*10)/10)}</p>}
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setCerrar(null)}>Cancelar</Btn><Btn onClick={cerrarJornada}>Guardar</Btn></div>
     </Modal>}
   </div>
 }
@@ -1615,10 +1750,627 @@ function Flotilla({tractores,setTractores,diesel,mtto,autorizaciones,loading,pue
   </div>
 }
 
+/* ── Utilidades de fecha / folios ── */
+const folioOT=id=>'OT-'+String(id).padStart(5,'0')
+const folioVale=id=>'VD-'+String(id).padStart(5,'0')
+const isoDate=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return z.toISOString().slice(0,10)}
+const addDaysD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x}
+const mondayOfD=d=>{const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x}
+const DIAS=['Lun','Mar','Mié','Jue','Vie','Sáb']
+const fmtHrs=h=>h==null||isNaN(h)?'—':(Math.round(h*10)/10).toLocaleString('es-MX')+' h'
+const fmtPct=v=>v==null||isNaN(v)?'—':Math.round(v*100)+'%'
+const fmtFechaCorta=s=>new Date(s+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short'})
+const fmtFechaHora=s=>s?new Date(s).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'
+const mismaPersona=(a,b)=>!!a&&!!b&&String(a).trim().toLowerCase()===String(b).trim().toLowerCase()
+
+function Timer({inicio}){
+  const [,f]=useState(0)
+  useEffect(()=>{const t=setInterval(()=>f(x=>x+1),1000);return()=>clearInterval(t)},[])
+  const s=Math.max(0,Math.floor((Date.now()-new Date(inicio).getTime())/1000))
+  return <span style={{fontVariantNumeric:'tabular-nums',fontWeight:600,color:'#BA7517',fontSize:16}}>{Math.floor(s/3600)}:{String(Math.floor(s%3600/60)).padStart(2,'0')}:{String(s%60).padStart(2,'0')}</span>
+}
+function AvisoMigracion(){
+  return <div style={{background:'#FAEEDA',border:'1px solid #E5C17A',borderRadius:10,padding:'12px 14px',fontSize:13,color:'#854F0B',marginBottom:14}}>
+    ⚠️ Faltan las tablas nuevas en Supabase. Ejecuta el archivo <strong>Jalisco_migracion_taller_vales.sql</strong> en el SQL Editor y presiona ↻.
+  </div>
+}
+
+/* ── Programación Taller ── */
+const TABS_TALLER={
+  admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
+  campo:[['mis','Mis trabajos']],
+  consulta:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
+}
+const PERM_TALLER={
+  admin:'Administrador: abre OT, asigna y reprograma trabajos, captura los avances diarios, inicia y termina trabajos y ve todos los reportes.',
+  campo:'Campo (mecánico): ve solo las OT asignadas a su nombre y registra el inicio y fin del tiempo de trabajo. No asigna ni escribe avances.',
+  consulta:'Consulta: solo lectura de programación, avances, MTBF y desempeño.',
+}
+function perfOT(list,hoy){
+  const deb=list.filter(o=>o.fecha<hoy||o.estado==='Terminado')
+  const fin=list.filter(o=>o.estado==='Terminado')
+  const est=fin.reduce((s,o)=>s+Number(o.horas_estimadas||0),0)
+  const real=fin.reduce((s,o)=>s+Number(o.horas_reales||0),0)
+  return{asig:deb.length,fin:fin.length,real,est,cump:deb.length?fin.length/deb.length:null,efi:real?est/real:null,corr:fin.filter(o=>o.tipo==='Correctivo').length}
+}
+
+function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,setAvances,tractores,diesel,rol,nombre,loading,tablasOk}){
+  const esAdmin=rol==='admin'
+  const tabs=TABS_TALLER[rol]||TABS_TALLER.consulta
+  const [tab,setTab]=useState(tabs[0][0])
+  const [semana,setSemana]=useState(0)
+  const [semDes,setSemDes]=useState(0)
+  const [periodo,setPeriodo]=useState(90)
+  const [detalleId,setDetalleId]=useState(null)
+  const [nuevo,setNuevo]=useState(null)
+  const [finId,setFinId]=useState(null)
+  const [printId,setPrintId]=useState(null)
+  const [showMec,setShowMec]=useState(false)
+  const [saving,setSaving]=useState(false)
+  const [yo,setYo]=useState(()=>{try{return Number(localStorage.getItem('flotilla_mec'))||''}catch(e){return ''}})
+  const [avTxt,setAvTxt]=useState('')
+  const [avOT,setAvOT]=useState('')
+  const [mTxt,setMTxt]=useState('')
+  const [nuevoMec,setNuevoMec]=useState('')
+  const [fForm,setFForm]=useState({mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2'})
+  const [horasReales,setHorasReales]=useState('')
+  const [repro,setRepro]=useState({fecha:'',mecanico_id:''})
+
+  const tabAct=tabs.find(t=>t[0]===tab)?tab:tabs[0][0]
+  const hoy=isoDate(new Date())
+  const thisMon=mondayOfD(new Date())
+  const mecNombre=id=>mecanicos.find(m=>m.id===id)?.nombre||'—'
+  const mecsActivos=mecanicos.filter(m=>m.activo!==false)
+  const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.fecha>=a&&o.fecha<=b)}
+  const puedeTrabajar=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'&&(esAdmin||(rol==='campo'&&o.mecanico_id===yo))
+  const weekLabel=w=>{const a=addDaysD(thisMon,w*7),b=addDaysD(a,5);const f=d=>d.toLocaleDateString('es-MX',{day:'numeric',month:'short'});return f(a)+' – '+f(b)+(w===0?' (esta semana)':'')}
+  const colorEstado=e=>e==='Terminado'?'#1D9E75':e==='En proceso'?'#BA7517':e==='No realizado'?'#A32D2D':'#378ADD'
+  const badgeEstado=e=>e==='Terminado'?'success':e==='En proceso'?'warning':e==='No realizado'?'danger':'info'
+
+  const actualizarOT=async(id,patch)=>{
+    const {data,error}=await supabase.from('ordenes_trabajo').update(patch).eq('id',id).select()
+    if(error){alert('Error: '+error.message);return false}
+    setOrdenes(os=>os.map(o=>o.id===id?{...o,...(data&&data[0]?data[0]:patch)}:o))
+    return true
+  }
+  const iniciar=async id=>{await actualizarOT(id,{estado:'En proceso',inicio:new Date().toISOString()})}
+  const terminar=async()=>{
+    const h=Number(horasReales)
+    if(!(h>0)){alert('Captura las horas reales de trabajo');return}
+    setSaving(true)
+    const ok=await actualizarOT(finId,{estado:'Terminado',horas_reales:h,fin:new Date().toISOString()})
+    setSaving(false)
+    if(ok){setFinId(null)}
+  }
+  const abrirTerminar=id=>{
+    const o=ordenes.find(x=>x.id===id)
+    const el=o?.inicio?Math.max(0.1,Math.round((Date.now()-new Date(o.inicio).getTime())/36e5*10)/10):Number(o?.horas_estimadas||1)
+    setHorasReales(String(el));setFinId(id)
+  }
+  const guardarOT=async()=>{
+    if(!fForm.mecanico_id||!fForm.tractor_id||!fForm.descripcion.trim()){alert('Mecánico, tractor y trabajo a realizar son obligatorios');return}
+    setSaving(true)
+    const row={mecanico_id:Number(fForm.mecanico_id),tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:fForm.fecha||hoy,descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:'Programado',creado_por:nombre}
+    const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
+    setSaving(false)
+    if(error){alert('Error: '+error.message);return}
+    setOrdenes(os=>[...os,data[0]])
+    const d=new Date((row.fecha)+'T12:00:00')
+    setSemana(Math.min(0,Math.round((mondayOfD(d)-thisMon)/6048e5)))
+    setNuevo(null)
+    setDetalleId(data[0].id)
+  }
+  const guardarAvance=async(otId,texto,limpiar)=>{
+    if(!esAdmin){alert('Solo el administrador puede agregar avances');return}
+    if(!otId||!texto.trim()){alert('Selecciona la OT y escribe el avance');return}
+    const row={ot_id:Number(otId),fecha:hoy,autor:nombre,texto:texto.trim()}
+    const {data,error}=await supabase.from('avances_ot').insert([row]).select()
+    if(error){alert('Error: '+error.message);return}
+    setAvances(a=>[data[0],...a]);limpiar()
+  }
+  const agregarMecanico=async()=>{
+    const n=nuevoMec.trim(); if(!n)return
+    const {data,error}=await supabase.from('mecanicos').insert([{nombre:n,activo:true}]).select()
+    if(error){alert('Error: '+error.message);return}
+    setMecanicos(m=>[...m,data[0]]);setNuevoMec('')
+  }
+  const toggleMecanico=async m=>{
+    const {error}=await supabase.from('mecanicos').update({activo:m.activo===false}).eq('id',m.id)
+    if(error){alert('Error: '+error.message);return}
+    setMecanicos(ms=>ms.map(x=>x.id===m.id?{...x,activo:m.activo===false}:x))
+  }
+  const elegirYo=v=>{setYo(v?Number(v):'');try{localStorage.setItem('flotilla_mec',v||'')}catch(e){}}
+
+  const detalle=ordenes.find(o=>o.id===detalleId)
+  const tractorDe=id=>tractores.find(t=>t.id===id)
+
+  /* ── Vista: programación ── */
+  const viewProg=()=>{
+    const mon=addDaysD(thisMon,semana*7), lista=ordenesSemana(semana)
+    return <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10,marginBottom:12}}>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <Btn small outline color="#888" onClick={()=>setSemana(s=>s-1)}>←</Btn>
+          <strong style={{fontSize:14}}>{weekLabel(semana)}</strong>
+          <Btn small outline color="#888" onClick={()=>setSemana(s=>Math.min(0,s+1))} disabled={semana>=0}>→</Btn>
+        </div>
+        {esAdmin&&<div style={{display:'flex',gap:8}}>
+          <Btn outline color="#534AB7" onClick={()=>setShowMec(true)}>👷 Mecánicos</Btn>
+          <Btn onClick={()=>{setFForm({mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:hoy,descripcion:'',horas_estimadas:'2'});setNuevo({})}}>+ Abrir OT</Btn>
+        </div>}
+      </div>
+      {mecsActivos.length===0?<EmptyState msg={esAdmin?'Aún no hay mecánicos. Agrégalos con el botón "👷 Mecánicos".':'Aún no hay mecánicos registrados.'}/>:
+      <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
+        <table style={{width:'100%',minWidth:780,borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>
+            <th style={{padding:'10px',textAlign:'left',fontSize:12,color:'var(--text2)',fontWeight:500}}>Mecánico</th>
+            {DIAS.map((d,i)=><th key={d} style={{padding:'10px',textAlign:'center',fontSize:12,color:'var(--text2)',fontWeight:500}}>{d} {addDaysD(mon,i).getDate()}</th>)}
+          </tr></thead>
+          <tbody>
+            {mecsActivos.map(m=><tr key={m.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+              <td style={{padding:'8px 10px',fontWeight:600,verticalAlign:'top',minWidth:110}}>{m.nombre}
+                <div style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>{fmtHrs(lista.filter(o=>o.mecanico_id===m.id).reduce((s,o)=>s+Number(o.horas_estimadas||0),0))} prog.</div></td>
+              {DIAS.map((_,i)=>{
+                const f=isoDate(addDaysD(mon,i)), js=lista.filter(o=>o.mecanico_id===m.id&&o.fecha===f)
+                return <td key={i} onClick={()=>{if(esAdmin&&js.length===0){setFForm({mecanico_id:String(m.id),tractor_id:'',tipo:'Correctivo',fecha:f,descripcion:'',horas_estimadas:'2'});setNuevo({})}}}
+                  style={{padding:5,verticalAlign:'top',minWidth:118,borderLeft:'0.5px solid var(--border)',background:f===hoy?'var(--bg2)':'transparent',cursor:esAdmin&&js.length===0?'pointer':'default'}}>
+                  {js.map(o=><button key={o.id} onClick={e=>{e.stopPropagation();setDetalleId(o.id)}} style={{display:'block',width:'100%',textAlign:'left',background:o.estado==='En proceso'?'#FAEEDA':'var(--bg)',border:'0.5px solid var(--border)',borderLeft:`4px solid ${colorEstado(o.estado)}`,borderRadius:6,padding:'4px 7px',marginBottom:4,cursor:'pointer',fontSize:12,color:'var(--text)'}}>
+                    <strong>{o.tractor_id}{o.tipo==='Correctivo'?' ⚠':''}</strong>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>{folioOT(o.id)}</div>
+                    <div style={{fontSize:11,color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{o.descripcion}</div>
+                  </button>)}
+                </td>
+              })}
+            </tr>)}
+          </tbody>
+        </table>
+      </div>}
+      <div style={{display:'flex',gap:14,flexWrap:'wrap',fontSize:12,color:'var(--text2)',marginTop:10}}>
+        {[['Programado','#378ADD'],['En proceso','#BA7517'],['Terminado','#1D9E75'],['No realizado','#A32D2D']].map(([l,c])=><span key={l}><i style={{display:'inline-block',width:10,height:10,borderRadius:3,background:c,marginRight:5}}/>{l}</span>)}
+        <span>⚠ Correctivo</span>
+      </div>
+      <p style={{fontSize:12,color:'var(--text3)'}}>{esAdmin?'Toca una celda vacía para abrir una OT ese día, o una OT para ver su detalle.':'Toca una OT para ver su detalle y avances.'}</p>
+    </div>
+  }
+
+  /* ── Vista: mis trabajos (campo) ── */
+  const viewMis=()=>{
+    const desde=isoDate(thisMon)
+    const mias=ordenes.filter(o=>o.mecanico_id===yo&&(o.fecha>=desde||o.estado==='En proceso')).sort((a,b)=>a.fecha<b.fecha?-1:1)
+    const pend=mias.filter(o=>o.estado==='Programado'||o.estado==='En proceso'), fin=mias.filter(o=>o.estado==='Terminado')
+    const card=o=><div key={o.id} style={{border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)',padding:'12px 14px',marginBottom:10}}>
+      <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}><strong>{folioOT(o.id)} · {o.tractor_id} · {o.descripcion}</strong><Badge color={badgeEstado(o.estado)}>{o.estado}</Badge></div>
+      <p style={{fontSize:12,color:'var(--text2)',margin:'4px 0 6px'}}>{fmtFechaCorta(o.fecha)} · <Badge color={o.tipo==='Correctivo'?'danger':'gray'}>{o.tipo}</Badge> · Estimado {fmtHrs(o.horas_estimadas)}{o.horas_reales!=null?` · Real ${fmtHrs(o.horas_reales)}`:''}</p>
+      {o.estado==='En proceso'&&o.inicio&&<div style={{marginBottom:6}}>⏱ <Timer inicio={o.inicio}/></div>}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <Btn small outline color="#378ADD" onClick={()=>setDetalleId(o.id)}>Detalle y avances</Btn>
+        {puedeTrabajar(o)&&(o.estado==='En proceso'?<Btn small onClick={()=>abrirTerminar(o.id)}>Terminar trabajo</Btn>:<Btn small onClick={()=>iniciar(o.id)}>Iniciar</Btn>)}
+      </div></div>
+    return <div>
+      <Field label="¿Quién eres?"><select value={yo} onChange={e=>elegirYo(e.target.value)} style={{maxWidth:280}}>
+        <option value="">Selecciona tu nombre...</option>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field>
+      {!yo?<EmptyState msg="Selecciona tu nombre para ver tus trabajos."/>:<>
+        {pend.length===0?<EmptyState msg="No tienes OT pendientes."/>:pend.map(card)}
+        {fin.length>0&&<><h3 style={{fontSize:14,margin:'18px 0 10px'}}>Terminados esta semana</h3>{fin.map(card)}</>}
+      </>}
+    </div>
+  }
+
+  /* ── Vista: avances diarios ── */
+  const viewAvances=()=>{
+    const abiertas=ordenes.filter(o=>o.estado==='Programado'||o.estado==='En proceso').sort((a,b)=>a.fecha<b.fecha?-1:1)
+    const feed=[...avances].sort((a,b)=>(a.created_at||a.fecha)<(b.created_at||b.fecha)?1:-1).slice(0,40)
+    const porDia={};feed.forEach(a=>{(porDia[a.fecha]=porDia[a.fecha]||[]).push(a)})
+    return <div>
+      {esAdmin?<Card title="Registrar avance del día">
+        <p style={{fontSize:12,color:'var(--text3)',margin:'-6px 0 10px'}}>Solo el administrador captura avances. Quedan con fecha, autor y hora.</p>
+        <Field label="Orden de trabajo"><select value={avOT} onChange={e=>setAvOT(e.target.value)}>
+          <option value="">Seleccionar OT...</option>
+          {abiertas.map(o=><option key={o.id} value={o.id}>{folioOT(o.id)} · {o.tractor_id} · {o.descripcion} ({mecNombre(o.mecanico_id)})</option>)}</select></Field>
+        <Field label="Avance"><textarea value={avTxt} onChange={e=>setAvTxt(e.target.value)} placeholder="Ej. Se desarmó la bomba, falta rectificar. Se espera refacción mañana." style={{width:'100%',minHeight:70,resize:'vertical'}}/></Field>
+        <div style={{display:'flex',justifyContent:'flex-end'}}><Btn onClick={()=>guardarAvance(avOT,avTxt,()=>setAvTxt(''))}>Guardar avance</Btn></div>
+      </Card>:null}
+      {Object.keys(porDia).length===0?<EmptyState msg="Aún no hay avances registrados."/>:Object.keys(porDia).sort().reverse().map(d=><div key={d}>
+        <p style={{fontSize:11,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--text3)',margin:'16px 0 6px'}}>{fmtFechaCorta(d)}</p>
+        {porDia[d].map(a=>{const o=ordenes.find(x=>x.id===a.ot_id);return <div key={a.id} style={{border:'0.5px solid var(--border)',borderRadius:10,padding:'10px 12px',marginBottom:8,background:'var(--bg)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap',fontSize:12,color:'var(--text2)',marginBottom:3}}>
+            <strong style={{color:'var(--text)'}}>{o?`${folioOT(o.id)} · ${o.tractor_id} · ${o.descripcion}`:'OT'}</strong>
+            <span>{o?mecNombre(o.mecanico_id)+' · ':''}{a.autor}{a.created_at?' · '+fmtFechaHora(a.created_at):''}</span></div>
+          <p style={{margin:0,fontSize:13,whiteSpace:'pre-wrap'}}>{a.texto}</p></div>})}
+      </div>)}
+    </div>
+  }
+
+  /* ── Vista: MTBF ── */
+  const viewMtbf=()=>{
+    const desde=periodo?isoDate(addDaysD(new Date(),-periodo)):'0000-00-00'
+    const filas=tractores.filter(t=>t.activo!==false).map(t=>{
+      const op=diesel.filter(r=>r.tractor_id===t.id&&r.fecha>=desde).reduce((s,r)=>s+Number(r.horas||0),0)
+      const f=ordenes.filter(o=>o.tractor_id===t.id&&o.tipo==='Correctivo'&&o.estado==='Terminado'&&o.fecha>=desde)
+      const n=f.length, rep=f.reduce((s,o)=>s+Number(o.horas_reales||0),0)
+      const mtbf=n&&op>0?op/n:null, mttr=n?rep/n:null
+      return{id:t.id,campo:t.campo,op,n,rep,mtbf,mttr,disp:mtbf!=null&&mttr!=null?mtbf/(mtbf+mttr):null}
+    })
+    const con=filas.filter(r=>r.n>0&&r.op>0)
+    const sOp=con.reduce((s,r)=>s+r.op,0), sN=con.reduce((s,r)=>s+r.n,0), sRep=con.reduce((s,r)=>s+r.rep,0)
+    const fMtbf=sN?sOp/sN:null, fMttr=sN?sRep/sN:null, fDisp=fMtbf!=null?fMtbf/(fMtbf+fMttr):null
+    const ord=[...filas].sort((a,b)=>(a.mtbf??1e12)-(b.mtbf??1e12))
+    const cls=d=>d==null?'var(--text2)':d<.9?'#A32D2D':d<.95?'#BA7517':'#0F6E56'
+    return <div>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+        <span style={{fontSize:13,color:'var(--text2)'}}>Periodo:</span>
+        <select value={periodo} onChange={e=>setPeriodo(Number(e.target.value))} style={{width:'auto'}}>
+          <option value={30}>Últimos 30 días</option><option value={60}>Últimos 60 días</option><option value={90}>Últimos 90 días</option><option value={180}>Últimos 180 días</option><option value={0}>Todo el historial</option></select>
+      </div>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
+        <Stat label="MTBF flota" value={fmtHrs(fMtbf)} sub="horas operadas entre fallas"/>
+        <Stat label="MTTR flota" value={fmtHrs(fMttr)} sub="horas promedio por reparación" color="#378ADD"/>
+        <Stat label="Disponibilidad" value={fmtPct(fDisp)} sub="MTBF ÷ (MTBF + MTTR)" color="#534AB7"/>
+        <Stat label="Fallas en el periodo" value={filas.reduce((s,r)=>s+r.n,0)} sub="OT correctivas terminadas" color="#D85A30"/>
+      </div>
+      <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['Tractor','Campo','Horas operadas','Fallas','Horas en taller','MTBF','MTTR','Disponib.'].map(h=><th key={h} style={{padding:'9px 10px',textAlign:'left',fontSize:12,color:'var(--text2)',fontWeight:500,whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
+          <tbody>{ord.map(r=><tr key={r.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+            <td style={{padding:'8px 10px',fontWeight:600}}>{r.id}</td><td style={{padding:'8px 10px'}}>{r.campo}</td>
+            <td style={{padding:'8px 10px'}}>{fmtHrs(r.op)}</td><td style={{padding:'8px 10px'}}>{r.n}</td><td style={{padding:'8px 10px'}}>{fmtHrs(r.rep)}</td>
+            <td style={{padding:'8px 10px'}}>{fmtHrs(r.mtbf)}</td><td style={{padding:'8px 10px'}}>{fmtHrs(r.mttr)}</td>
+            <td style={{padding:'8px 10px',fontWeight:600,color:cls(r.disp)}}>{fmtPct(r.disp)}</td></tr>)}</tbody>
+        </table>
+      </div>
+      <div style={{marginTop:14}}><Card title="Cómo se calcula">
+        <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>MTBF</strong> (tiempo medio entre fallas) = horas operadas ÷ número de fallas. Más alto = más confiable.</p>
+        <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>MTTR</strong> (tiempo medio de reparación) = horas reales de las OT correctivas ÷ número de fallas.</p>
+        <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>Disponibilidad</strong> = MTBF ÷ (MTBF + MTTR). Rojo bajo 90%, amarillo bajo 95%.</p>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0}}>Las horas operadas salen de las horas registradas en Diesel (horómetro final − inicial). Un tractor sin horas o sin fallas muestra "—".</p>
+      </Card></div>
+    </div>
+  }
+
+  /* ── Vista: desempeño semanal ── */
+  const viewDesemp=()=>{
+    const lista=ordenesSemana(semDes)
+    const per=mecsActivos.map(m=>({m,...perfOT(lista.filter(o=>o.mecanico_id===m.id),hoy)}))
+    const team=perfOT(lista,hoy)
+    const conC=per.filter(p=>p.cump!=null), conE=per.filter(p=>p.efi!=null)
+    const avgC=conC.length?conC.reduce((s,p)=>s+p.cump,0)/conC.length:null
+    const avgE=conE.length?conE.reduce((s,p)=>s+p.efi,0)/conE.length:null
+    const bar=(label,v,max,avg)=>{
+      const p=v==null?0:Math.min(100,v/max*100), bajo=v!=null&&avg!=null&&v<avg
+      return <div key={label} style={{display:'grid',gridTemplateColumns:'100px 1fr 48px',gap:10,alignItems:'center',margin:'9px 0',fontSize:13}}>
+        <span>{label}</span>
+        <div style={{position:'relative',height:16,background:'var(--bg2)',borderRadius:4}}>
+          <div style={{position:'absolute',inset:'0 auto 0 0',width:p+'%',borderRadius:4,background:v==null?'transparent':bajo?'#BA7517':'#1D9E75'}}/>
+          {avg!=null&&<div title="Promedio del taller" style={{position:'absolute',top:-3,bottom:-3,width:2,background:'var(--text)',left:Math.min(100,avg/max*100)+'%'}}/>}
+        </div>
+        <span style={{textAlign:'right',fontWeight:600}}>{fmtPct(v)}</span></div>
+    }
+    const delta=(v,a)=>v==null||a==null?'':<span style={{color:v>=a?'#0F6E56':'#A32D2D',fontSize:12}}> {v>=a?'▲':'▼'} {Math.abs(Math.round((v-a)*100))} pts</span>
+    const tendencia=[-3,-2,-1,0].map(k=>{
+      const pp=mecsActivos.map(m=>perfOT(ordenesSemana(k).filter(o=>o.mecanico_id===m.id),hoy)).filter(p=>p.cump!=null)
+      return{k,c:pp.length?pp.reduce((s,p)=>s+p.cump,0)/pp.length:null}
+    })
+    return <div>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12}}>
+        <Btn small outline color="#888" onClick={()=>setSemDes(s=>s-1)}>←</Btn>
+        <strong style={{fontSize:14}}>{weekLabel(semDes)}</strong>
+        <Btn small outline color="#888" onClick={()=>setSemDes(s=>Math.min(0,s+1))} disabled={semDes>=0}>→</Btn>
+      </div>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
+        <Stat label="Cumplimiento del taller" value={fmtPct(avgC)} sub="terminados ÷ asignados (promedio)"/>
+        <Stat label="Eficiencia del taller" value={fmtPct(avgE)} sub="horas estimadas ÷ reales (promedio)" color="#378ADD"/>
+        <Stat label="OT terminadas" value={`${team.fin} de ${team.asig}`} sub={`${team.corr} correctivas`} color="#534AB7"/>
+        <Stat label="Horas trabajadas" value={fmtHrs(team.real)} sub={`${fmtHrs(team.est)} estimadas`} color="#D85A30"/>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:14,marginBottom:14}}>
+        <Card title="Cumplimiento por mecánico"><p style={{fontSize:11,color:'var(--text3)',margin:'-6px 0 4px'}}>La línea negra es el promedio del taller.</p>{per.map(p=>bar(p.m.nombre,p.cump,1,avgC))}</Card>
+        <Card title="Eficiencia por mecánico"><p style={{fontSize:11,color:'var(--text3)',margin:'-6px 0 4px'}}>100% = tardó lo estimado. Más es mejor.</p>{per.map(p=>bar(p.m.nombre,p.efi,1.5,avgE))}</Card>
+      </div>
+      <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)',marginBottom:14}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['Mecánico','Asignadas','Terminadas','Correctivas','Horas reales','Horas estim.','Cumplimiento','Eficiencia'].map(h=><th key={h} style={{padding:'9px 10px',textAlign:'left',fontSize:12,color:'var(--text2)',fontWeight:500,whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
+          <tbody>
+            {per.map(p=><tr key={p.m.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+              <td style={{padding:'8px 10px',fontWeight:600}}>{p.m.nombre}</td><td style={{padding:'8px 10px'}}>{p.asig}</td><td style={{padding:'8px 10px'}}>{p.fin}</td><td style={{padding:'8px 10px'}}>{p.corr}</td>
+              <td style={{padding:'8px 10px'}}>{fmtHrs(p.real)}</td><td style={{padding:'8px 10px'}}>{fmtHrs(p.est)}</td>
+              <td style={{padding:'8px 10px'}}>{fmtPct(p.cump)}{delta(p.cump,avgC)}</td><td style={{padding:'8px 10px'}}>{fmtPct(p.efi)}{delta(p.efi,avgE)}</td></tr>)}
+            <tr style={{background:'var(--bg2)'}}><td style={{padding:'8px 10px',fontWeight:700}}>Promedio del taller</td>
+              <td style={{padding:'8px 10px'}}>{per.length?(team.asig/per.length).toFixed(1):'—'}</td><td style={{padding:'8px 10px'}}>{per.length?(team.fin/per.length).toFixed(1):'—'}</td><td style={{padding:'8px 10px'}}>{per.length?(team.corr/per.length).toFixed(1):'—'}</td>
+              <td style={{padding:'8px 10px'}}>{per.length?fmtHrs(team.real/per.length):'—'}</td><td style={{padding:'8px 10px'}}>{per.length?fmtHrs(team.est/per.length):'—'}</td>
+              <td style={{padding:'8px 10px',fontWeight:700}}>{fmtPct(avgC)}</td><td style={{padding:'8px 10px',fontWeight:700}}>{fmtPct(avgE)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <Card title="Cumplimiento promedio del taller, últimas 4 semanas (indicador del jefe de taller)">
+        <div style={{display:'flex',gap:14,alignItems:'flex-end',height:130,paddingTop:6}}>
+          {tendencia.map(t=><div key={t.k} style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-end',alignItems:'center',height:'100%',gap:4,fontSize:12,color:'var(--text2)'}}>
+            <span>{fmtPct(t.c)}</span><div style={{width:'100%',maxWidth:56,height:(t.c||0)*80,background:t.k===semDes?'#0F6E56':'#1D9E75',borderRadius:'4px 4px 0 0'}}/><span>{t.k===0?'Esta':'Sem '+t.k}</span></div>)}
+        </div>
+      </Card>
+    </div>
+  }
+
+  const body={prog:viewProg,mis:viewMis,avances:viewAvances,mtbf:viewMtbf,desemp:viewDesemp}[tabAct]()
+  return <div>
+    <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 12px'}}>🛠️ Programación Taller</h2>
+    {!tablasOk&&<AvisoMigracion/>}
+    <div style={{display:'flex',gap:2,overflowX:'auto',borderBottom:'0.5px solid var(--border)',marginBottom:14}}>
+      {tabs.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 14px',fontSize:13,whiteSpace:'nowrap',borderBottom:tabAct===k?'2px solid #1D9E75':'2px solid transparent',color:tabAct===k?'#0F6E56':'var(--text2)',fontWeight:tabAct===k?600:400}}>{l}</button>)}
+    </div>
+    <div style={{background:'#E6F1FB',color:'#185FA5',borderRadius:8,padding:'8px 12px',fontSize:12,marginBottom:14}}>{PERM_TALLER[rol]||PERM_TALLER.consulta}</div>
+    {loading?<Spinner/>:body}
+
+    {nuevo&&<Modal title="Abrir orden de trabajo (OT)" onClose={()=>setNuevo(null)}>
+      <p style={{fontSize:12,color:'var(--text3)',margin:'-8px 0 12px'}}>Al guardar se genera el folio de la OT (OT-00001, OT-00002...).</p>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="Mecánico *"><select value={fForm.mecanico_id} onChange={e=>setFForm(f=>({...f,mecanico_id:e.target.value}))}><option value="">Seleccionar...</option>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field>
+        <Field label="Tractor *"><select value={fForm.tractor_id} onChange={e=>setFForm(f=>({...f,tractor_id:e.target.value}))}><option value="">Seleccionar...</option>{tractores.map(t=><option key={t.id} value={t.id}>{t.id} · {t.campo}</option>)}</select></Field>
+        <Field label="Tipo"><select value={fForm.tipo} onChange={e=>setFForm(f=>({...f,tipo:e.target.value}))}><option>Correctivo</option><option>Preventivo</option></select></Field>
+        <Field label="Día"><input type="date" value={fForm.fecha} onChange={e=>setFForm(f=>({...f,fecha:e.target.value}))}/></Field>
+      </div>
+      <Field label="Trabajo a realizar *"><input type="text" placeholder="Ej. Cambio de bomba hidráulica" value={fForm.descripcion} onChange={e=>setFForm(f=>({...f,descripcion:e.target.value}))}/></Field>
+      <Field label="Horas estimadas"><input type="number" min="0.5" step="0.5" value={fForm.horas_estimadas} onChange={e=>setFForm(f=>({...f,horas_estimadas:e.target.value}))}/></Field>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setNuevo(null)}>Cancelar</Btn><Btn onClick={guardarOT} disabled={saving}>{saving?'Guardando...':'Abrir OT'}</Btn></div>
+    </Modal>}
+
+    {detalle&&<Modal title={`${folioOT(detalle.id)} · ${detalle.tractor_id}`} onClose={()=>{setDetalleId(null);setMTxt('')}} wide>
+      <p style={{margin:'-6px 0 10px',fontSize:14}}>{detalle.descripcion}</p>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
+        <Badge color={badgeEstado(detalle.estado)}>{detalle.estado}</Badge><Badge color={detalle.tipo==='Correctivo'?'danger':'gray'}>{detalle.tipo}</Badge>
+        <span style={{fontSize:12,color:'var(--text2)'}}>{mecNombre(detalle.mecanico_id)} · {fmtFechaCorta(detalle.fecha)} · Estimado {fmtHrs(detalle.horas_estimadas)}{detalle.horas_reales!=null?` · Real ${fmtHrs(detalle.horas_reales)}`:''}</span>
+      </div>
+      {detalle.estado==='En proceso'&&detalle.inicio&&<div style={{marginBottom:10}}>⏱ Tiempo de trabajo: <Timer inicio={detalle.inicio}/></div>}
+      <p style={{fontSize:11,color:'var(--text3)',margin:'0 0 10px'}}>Abierta por {detalle.creado_por||'—'}{detalle.created_at?' · '+fmtFechaHora(detalle.created_at):''}</p>
+      <h4 style={{fontSize:13,margin:'8px 0'}}>Avances</h4>
+      {avances.filter(a=>a.ot_id===detalle.id).length===0?<p style={{fontSize:12,color:'var(--text3)'}}>Sin avances todavía.</p>:
+        avances.filter(a=>a.ot_id===detalle.id).sort((a,b)=>(a.created_at||a.fecha)<(b.created_at||b.fecha)?-1:1).map(a=><div key={a.id} style={{border:'0.5px solid var(--border)',borderRadius:8,padding:'8px 10px',marginBottom:6,fontSize:13}}>
+          <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>{fmtFechaCorta(a.fecha)} · {a.autor}{a.created_at?' · '+fmtFechaHora(a.created_at):''}</div>{a.texto}</div>)}
+      {esAdmin&&detalle.estado!=='Terminado'&&<div style={{marginTop:10}}>
+        <Field label="Agregar avance (solo administrador)"><textarea value={mTxt} onChange={e=>setMTxt(e.target.value)} style={{width:'100%',minHeight:60}}/></Field>
+        <div style={{display:'flex',justifyContent:'flex-end'}}><Btn small outline color="#1D9E75" onClick={()=>guardarAvance(detalle.id,mTxt,()=>setMTxt(''))}>Guardar avance</Btn></div>
+      </div>}
+      {esAdmin&&detalle.estado!=='Terminado'&&<div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
+        <h4 style={{fontSize:13,margin:'0 0 8px'}}>Reprogramar</h4>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <input type="date" value={repro.fecha||detalle.fecha} onChange={e=>setRepro(r=>({...r,fecha:e.target.value}))} style={{width:'auto'}}/>
+          <select value={repro.mecanico_id||detalle.mecanico_id} onChange={e=>setRepro(r=>({...r,mecanico_id:e.target.value}))} style={{width:'auto'}}>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select>
+          <Btn small outline color="#534AB7" onClick={async()=>{if(await actualizarOT(detalle.id,{fecha:repro.fecha||detalle.fecha,mecanico_id:Number(repro.mecanico_id||detalle.mecanico_id),estado:detalle.estado==='No realizado'?'Programado':detalle.estado}))setRepro({fecha:'',mecanico_id:''})}}>Guardar cambio</Btn>
+          {detalle.estado==='Programado'&&<Btn small outline color="#A32D2D" onClick={()=>actualizarOT(detalle.id,{estado:'No realizado'})}>Marcar no realizado</Btn>}
+        </div>
+      </div>}
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16,flexWrap:'wrap'}}>
+        <Btn small outline color="#378ADD" onClick={()=>setPrintId(detalle.id)}>🖨️ Imprimir OT</Btn>
+        {puedeTrabajar(detalle)&&(detalle.estado==='En proceso'?<Btn onClick={()=>abrirTerminar(detalle.id)}>Terminar trabajo</Btn>:<Btn onClick={()=>iniciar(detalle.id)}>Iniciar trabajo</Btn>)}
+      </div>
+    </Modal>}
+
+    {finId&&<Modal title="Terminar trabajo" onClose={()=>setFinId(null)}>
+      <p style={{fontSize:12,color:'var(--text2)',margin:'-6px 0 10px'}}>{folioOT(finId)} · El reloj midió el tiempo sugerido. Ajústalo si hubo pausas o paros.</p>
+      <Field label="Horas reales de trabajo"><input type="number" min="0.1" step="0.1" value={horasReales} onChange={e=>setHorasReales(e.target.value)}/></Field>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setFinId(null)}>Cancelar</Btn><Btn onClick={terminar} disabled={saving}>{saving?'Guardando...':'Marcar terminado'}</Btn></div>
+    </Modal>}
+
+    {showMec&&<Modal title="Mecánicos del taller" onClose={()=>setShowMec(false)}>
+      {mecanicos.length===0&&<p style={{fontSize:13,color:'var(--text3)'}}>Aún no hay mecánicos.</p>}
+      {mecanicos.map(m=><div key={m.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'0.5px solid var(--border)',fontSize:13}}>
+        <span style={{opacity:m.activo===false?0.5:1}}>{m.nombre}{m.activo===false?' (inactivo)':''}</span>
+        <Btn small outline color="#888" onClick={()=>toggleMecanico(m)}>{m.activo===false?'Activar':'Desactivar'}</Btn></div>)}
+      <div style={{display:'flex',gap:8,marginTop:14}}>
+        <input type="text" placeholder="Nombre del mecánico" value={nuevoMec} onChange={e=>setNuevoMec(e.target.value)} onKeyDown={e=>e.key==='Enter'&&agregarMecanico()}/>
+        <Btn onClick={agregarMecanico}>Agregar</Btn></div>
+    </Modal>}
+
+    {printId&&(()=>{const o=ordenes.find(x=>x.id===printId);if(!o)return null;const t=tractorDe(o.tractor_id)
+      return <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:2000,overflowY:'auto',padding:'24px 12px'}}>
+        <div style={{maxWidth:760,margin:'0 auto',background:'#fff',borderRadius:8,padding:'40px 48px',color:'#1a1a18'}}>
+          <div className="no-print" style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:20}}>
+            <button onClick={()=>window.print()} style={{padding:'8px 18px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:500}}>🖨️ Imprimir / Guardar PDF</button>
+            <button onClick={()=>setPrintId(null)} style={{padding:'8px 18px',borderRadius:8,background:'none',border:'0.5px solid #ccc',cursor:'pointer',fontSize:13}}>Cerrar</button></div>
+          <div style={{textAlign:'center',marginBottom:24,borderBottom:'2px solid #1D9E75',paddingBottom:16}}>
+            <h1 style={{fontSize:22,fontWeight:700,margin:'0 0 4px'}}>Orden de Trabajo {folioOT(o.id)}</h1>
+            <p style={{fontSize:13,color:'#5F5E5A',margin:0}}>Grupo Molina · Taller de Maquinaria Jalisco</p></div>
+          <table style={{width:'100%',fontSize:13,borderCollapse:'collapse',marginBottom:20}}><tbody>
+            <tr><td style={{padding:'6px 0',fontWeight:600,width:170}}>Fecha programada:</td><td>{o.fecha}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Tractor:</td><td>{o.tractor_id}{t?` — ${t.marca||''} ${t.modelo||''} · Campo ${t.campo}`:''}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Mecánico asignado:</td><td>{mecNombre(o.mecanico_id)}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Tipo:</td><td>{o.tipo}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Horas estimadas:</td><td>{fmtHrs(o.horas_estimadas)}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Horas reales:</td><td>{o.horas_reales!=null?fmtHrs(o.horas_reales):'________'}</td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Estado:</td><td><strong>{o.estado}</strong></td></tr>
+            <tr><td style={{padding:'6px 0',fontWeight:600}}>Abierta por:</td><td>{o.creado_por||'—'}</td></tr></tbody></table>
+          <p style={{fontWeight:600,fontSize:13,marginBottom:6}}>Trabajo a realizar:</p>
+          <p style={{fontSize:13,background:'#f7f7f5',padding:'10px 12px',borderRadius:6,marginBottom:20}}>{o.descripcion}</p>
+          <p style={{fontWeight:600,fontSize:13,marginBottom:6}}>Avances:</p>
+          {avances.filter(a=>a.ot_id===o.id).length===0?<p style={{fontSize:13,color:'#888',marginBottom:20}}>Sin avances registrados.</p>:avances.filter(a=>a.ot_id===o.id).map(a=><p key={a.id} style={{fontSize:13,margin:'0 0 6px'}}><strong>{a.fecha}</strong> ({a.autor}): {a.texto}</p>)}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:30,marginTop:56}}>
+            <div style={{textAlign:'center'}}><div style={{borderTop:'1px solid #333',paddingTop:6,fontSize:12}}>Mecánico</div></div>
+            <div style={{textAlign:'center'}}><div style={{borderTop:'1px solid #333',paddingTop:6,fontSize:12}}>Jefe de taller / Administrador</div></div></div>
+        </div></div>})()}
+  </div>
+}
+
+/* ── Vales de carga de combustible ── */
+const VIGENCIA_VALE_HRS=48
+function estadoVale(v,ahora){
+  if(v.estado==='Vigente'&&new Date(v.vence).getTime()<=ahora)return 'Vencido'
+  return v.estado
+}
+const badgeVale=e=>e==='Ejecutado'?'success':e==='Vigente'?'info':e==='Vencido'?'warning':'danger'
+function horasRestantes(v,ahora){
+  const min=Math.round((new Date(v.vence).getTime()-ahora)/60000)
+  if(min<=0)return 'vencido'
+  const h=Math.floor(min/60),m=min%60
+  return h>=1?`${h} h ${m} min`:`${m} min`
+}
+
+function Vales({vales,setVales,tractores,diesel,presupuestos,rol,nombre,loading,tablasOk,onEjecutar}){
+  const esAdmin=rol==='admin'
+  const puedeGenerar=rol==='admin'||rol==='campo'
+  const [tab,setTab]=useState('lista')
+  const [ahora,setAhora]=useState(Date.now())
+  useEffect(()=>{const t=setInterval(()=>setAhora(Date.now()),30000);return()=>clearInterval(t)},[])
+  const [fEstado,setFEstado]=useState('Todos')
+  const [fTractor,setFTractor]=useState('Todos')
+  const mesActual=new Date().toISOString().substring(0,7)
+  const [desde,setDesde]=useState(mesActual+'-01')
+  const [hasta,setHasta]=useState(new Date().toISOString().split('T')[0])
+  const [showNuevo,setShowNuevo]=useState(false)
+  const [saving,setSaving]=useState(false)
+  const [form,setForm]=useState({tractor_id:'',litros:'',motivo:''})
+  const [cancelV,setCancelV]=useState(null)
+  const [motivoC,setMotivoC]=useState('')
+  const [printV,setPrintV]=useState(null)
+
+  const ids=[...new Set(tractores.map(t=>t.id))].sort()
+  const tractorDe=id=>tractores.find(t=>t.id===id)
+
+  const alertaPres=useMemo(()=>{
+    if(!form.tractor_id||!form.litros)return null
+    const pres=presupuestos.find(p=>p.tractor_id===form.tractor_id&&p.mes===mesActual)
+    if(!pres)return null
+    const consumido=diesel.filter(r=>r.tractor_id===form.tractor_id&&r.fecha?.startsWith(mesActual)).reduce((s,r)=>s+Number(r.litros||0),0)
+    const pendientes=vales.filter(v=>v.tractor_id===form.tractor_id&&v.estado==='Vigente'&&new Date(v.vence).getTime()>ahora).reduce((s,v)=>s+Number(v.litros_autorizados||0),0)
+    const total=consumido+pendientes+Number(form.litros)
+    return total>pres.litros_asignados?`⚠️ Con este vale el tractor llegaría a ${total.toFixed(0)} L de ${pres.litros_asignados} L del presupuesto del mes (incluye ${pendientes.toFixed(0)} L en vales vigentes).`:null
+  },[form.tractor_id,form.litros,presupuestos,diesel,vales,ahora])
+
+  const generar=async()=>{
+    if(!form.tractor_id||!(Number(form.litros)>0)||!form.motivo.trim()){alert('Tractor, litros y motivo son obligatorios');return}
+    setSaving(true)
+    const emision=new Date()
+    const row={tractor_id:form.tractor_id,litros_autorizados:Number(form.litros),motivo:form.motivo.trim(),generado_por:nombre,fecha_emision:emision.toISOString(),vence:new Date(emision.getTime()+VIGENCIA_VALE_HRS*36e5).toISOString(),estado:'Vigente'}
+    const {data,error}=await supabase.from('vales_diesel').insert([row]).select()
+    setSaving(false)
+    if(error){alert('Error: '+error.message);return}
+    setVales(v=>[data[0],...v]);setShowNuevo(false);setForm({tractor_id:'',litros:'',motivo:''});setPrintV(data[0].id)
+  }
+  const cancelar=async()=>{
+    if(!motivoC.trim()){alert('Escribe el motivo de la cancelación');return}
+    const patch={estado:'Cancelado',cancelado_por:nombre,motivo_cancelacion:motivoC.trim()}
+    const {data,error}=await supabase.from('vales_diesel').update(patch).eq('id',cancelV.id).eq('estado','Vigente').select()
+    if(error||!data||data.length===0){alert('No se pudo cancelar: '+(error?error.message:'el vale ya fue ejecutado o cancelado.'));return}
+    setVales(vs=>vs.map(v=>v.id===cancelV.id?{...v,...patch}:v));setCancelV(null);setMotivoC('')
+  }
+
+  const conEstado=vales.map(v=>({...v,_e:estadoVale(v,ahora)}))
+  const lista=conEstado.filter(v=>(fEstado==='Todos'||v._e===fEstado)&&(fTractor==='Todos'||v.tractor_id===fTractor))
+  const vigentesN=conEstado.filter(v=>v._e==='Vigente').length
+
+  // Reporte
+  const rep=conEstado.filter(v=>{const f=(v.fecha_emision||'').substring(0,10);return f>=desde&&f<=hasta&&(fEstado==='Todos'||v._e===fEstado)&&(fTractor==='Todos'||v.tractor_id===fTractor)})
+  const ejec=rep.filter(v=>v._e==='Ejecutado'), venc=rep.filter(v=>v._e==='Vencido'), canc=rep.filter(v=>v._e==='Cancelado'), vig=rep.filter(v=>v._e==='Vigente')
+  const cerrados=ejec.length+venc.length+canc.length
+  const efect=cerrados?ejec.length/cerrados:null
+  const litAut=ejec.reduce((s,v)=>s+Number(v.litros_autorizados||0),0)
+  const litCar=ejec.reduce((s,v)=>s+Number(v.litros_cargados||0),0)
+  const tiempos=ejec.filter(v=>v.fecha_ejecucion).map(v=>(new Date(v.fecha_ejecucion)-new Date(v.fecha_emision))/36e5)
+  const tProm=tiempos.length?tiempos.reduce((s,x)=>s+x,0)/tiempos.length:null
+  const exportCSV=()=>{
+    const hdr=['Folio','Estado','Tractor','Campo','Litros autorizados','Litros cargados','Diferencia','Motivo','Generado por','Emitido','Vence','Ejecutado por','Ejecutado','Horas a ejecución','Cancelado por','Motivo cancelación']
+    const data=rep.map(v=>[folioVale(v.id),v._e,v.tractor_id,tractorDe(v.tractor_id)?.campo||'',v.litros_autorizados,v.litros_cargados??'',v.litros_cargados!=null?(Number(v.litros_cargados)-Number(v.litros_autorizados)).toFixed(1):'',v.motivo||'',v.generado_por||'',v.fecha_emision||'',v.vence||'',v.ejecutado_por||'',v.fecha_ejecucion||'',v.fecha_ejecucion?((new Date(v.fecha_ejecucion)-new Date(v.fecha_emision))/36e5).toFixed(1):'',v.cancelado_por||'',v.motivo_cancelacion||''])
+    const csv=[hdr,...data].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'})
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`vales_${desde}_${hasta}.csv`;a.click()
+  }
+
+  const tabBtn=(k,l)=><button key={k} onClick={()=>setTab(k)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 14px',fontSize:13,whiteSpace:'nowrap',borderBottom:tab===k?'2px solid #1D9E75':'2px solid transparent',color:tab===k?'#0F6E56':'var(--text2)',fontWeight:tab===k?600:400}}>{l}</button>
+  const filtros=<div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}} className="no-print">
+    {tab==='reporte'&&<><span style={{fontSize:12,color:'var(--text2)'}}>Del</span><input type="date" value={desde} onChange={e=>setDesde(e.target.value)} style={{width:'auto'}}/><span style={{fontSize:12,color:'var(--text2)'}}>al</span><input type="date" value={hasta} onChange={e=>setHasta(e.target.value)} style={{width:'auto'}}/></>}
+    <select value={fEstado} onChange={e=>setFEstado(e.target.value)} style={{width:'auto',padding:'7px 12px'}}>{['Todos','Vigente','Ejecutado','Vencido','Cancelado'].map(x=><option key={x}>{x}</option>)}</select>
+    <select value={fTractor} onChange={e=>setFTractor(e.target.value)} style={{width:'auto',padding:'7px 12px'}}><option>Todos</option>{ids.map(t=><option key={t}>{t}</option>)}</select>
+  </div>
+  const tabla=(rows,conAcciones)=><div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+    <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['Folio','Estado','Tractor','Autorizado','Cargado','Motivo','Generó','Emitido','Vigencia','Ejecutó',''].map(h=><th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',fontSize:12,whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
+    <tbody>{rows.map(v=>{
+      const mismo=mismaPersona(v.generado_por,nombre)
+      return <tr key={v.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+        <td style={{padding:'8px 10px',fontWeight:600,whiteSpace:'nowrap'}}>{folioVale(v.id)}</td>
+        <td style={{padding:'8px 10px'}}><Badge color={badgeVale(v._e)}>{v._e}</Badge></td>
+        <td style={{padding:'8px 10px',fontWeight:600}}>{v.tractor_id}</td>
+        <td style={{padding:'8px 10px'}}>{v.litros_autorizados} L</td>
+        <td style={{padding:'8px 10px',color:v.litros_cargados!=null&&Number(v.litros_cargados)>Number(v.litros_autorizados)?'#A32D2D':'inherit'}}>{v.litros_cargados!=null?v.litros_cargados+' L':'-'}</td>
+        <td style={{padding:'8px 10px',maxWidth:200,fontSize:12}}>{v.motivo||'-'}{v._e==='Cancelado'&&v.motivo_cancelacion&&<div style={{color:'#A32D2D'}}>Cancelado: {v.motivo_cancelacion}</div>}</td>
+        <td style={{padding:'8px 10px',fontSize:12}}>{v.generado_por}</td>
+        <td style={{padding:'8px 10px',fontSize:12,whiteSpace:'nowrap'}}>{fmtFechaHora(v.fecha_emision)}</td>
+        <td style={{padding:'8px 10px',fontSize:12,whiteSpace:'nowrap'}}>{v._e==='Vigente'?`Quedan ${horasRestantes(v,ahora)}`:fmtFechaHora(v.vence)}</td>
+        <td style={{padding:'8px 10px',fontSize:12}}>{v.ejecutado_por?`${v.ejecutado_por} · ${fmtFechaHora(v.fecha_ejecucion)}`:'-'}</td>
+        <td style={{padding:'8px 10px',whiteSpace:'nowrap'}} className="no-print">{conAcciones&&<div style={{display:'flex',gap:6}}>
+          {v._e==='Vigente'&&rol!=='consulta'&&(mismo?<span style={{fontSize:11,color:'var(--text3)'}}>Lo ejecuta otra persona</span>:<Btn small onClick={()=>onEjecutar(v.id)}>Cargar diesel</Btn>)}
+          {v._e==='Vigente'&&(esAdmin||mismo)&&<Btn small outline color="#A32D2D" onClick={()=>{setCancelV(v);setMotivoC('')}}>Cancelar</Btn>}
+          <Btn small outline color="#378ADD" onClick={()=>setPrintV(v.id)}>🖨️</Btn></div>}</td>
+      </tr>})}</tbody></table></div>
+
+  const valeImp=printV?conEstado.find(v=>v.id===printV):null
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}} className="no-print">
+      <h2 style={{fontSize:18,fontWeight:600,margin:0}}>🎫 Vales de combustible</h2>
+      {puedeGenerar&&<Btn onClick={()=>setShowNuevo(true)}>+ Generar vale</Btn>}
+    </div>
+    {!tablasOk&&<AvisoMigracion/>}
+    <div style={{display:'flex',gap:2,borderBottom:'0.5px solid var(--border)',marginBottom:14}} className="no-print">{tabBtn('lista',`Vales (${vigentesN} vigentes)`)}{tabBtn('reporte','Reporte de vales efectivos')}</div>
+    <div style={{background:'#E6F1FB',color:'#185FA5',borderRadius:8,padding:'8px 12px',fontSize:12,marginBottom:14}} className="no-print">
+      Cada vale tiene folio y vigencia de {VIGENCIA_VALE_HRS} horas. Una persona lo genera y <strong>otra distinta</strong> lo ejecuta al registrar la carga en Diesel. {rol==='consulta'?'Consulta: solo lectura.':''}</div>
+    {filtros}
+    {loading?<Spinner/>:tab==='lista'?(lista.length===0?<EmptyState msg="Sin vales registrados."/>:tabla(lista,true)):<div>
+      <div style={{display:'flex',gap:10,marginBottom:12}} className="no-print">
+        <button onClick={()=>window.print()} style={{padding:'7px 14px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',fontSize:12,cursor:'pointer'}}>🖨️ Imprimir / PDF</button>
+        <button onClick={exportCSV} style={{padding:'7px 14px',borderRadius:8,background:'#1D9E75',color:'#fff',border:'none',fontSize:12,cursor:'pointer'}}>⬇ Exportar Excel (CSV)</button></div>
+      <p style={{fontSize:13,fontWeight:600,margin:'0 0 10px'}}>Reporte de vales efectivos · {desde} al {hasta}</p>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
+        <Stat label="Emitidos" value={rep.length} sub={`${vig.length} aún vigentes`} color="#378ADD"/>
+        <Stat label="Efectivos (ejecutados)" value={ejec.length} sub={`${litCar.toLocaleString()} L cargados`}/>
+        <Stat label="Vencidos sin usar" value={venc.length} color="#BA7517"/>
+        <Stat label="Cancelados" value={canc.length} color="#A32D2D"/>
+        <Stat label="% de efectividad" value={fmtPct(efect)} sub="ejecutados ÷ (ejecutados + vencidos + cancelados)" color="#534AB7"/>
+        <Stat label="Tiempo a ejecución" value={fmtHrs(tProm)} sub="promedio desde la emisión" color="#D85A30"/>
+      </div>
+      {ejec.length>0&&<p style={{fontSize:12,color:'var(--text2)',margin:'0 0 12px'}}>Litros autorizados en vales ejecutados: <strong>{litAut.toLocaleString()} L</strong> · cargados: <strong>{litCar.toLocaleString()} L</strong> · diferencia: <strong style={{color:litCar>litAut?'#A32D2D':'inherit'}}>{(litCar-litAut).toLocaleString()} L</strong></p>}
+      {rep.length===0?<EmptyState msg="Sin vales en el periodo."/>:tabla(rep,false)}
+    </div>}
+
+    {showNuevo&&<Modal title="Generar vale de carga" onClose={()=>setShowNuevo(false)}>
+      <p style={{fontSize:12,color:'var(--text3)',margin:'-8px 0 12px'}}>Vigencia: {VIGENCIA_VALE_HRS} horas desde la emisión. Lo debe ejecutar una persona distinta a {nombre}.</p>
+      <Field label="Tractor *"><select value={form.tractor_id} onChange={e=>setForm(f=>({...f,tractor_id:e.target.value}))}><option value="">Seleccionar...</option>{tractores.map(t=><option key={t.id} value={t.id}>{t.id} · {t.campo}</option>)}</select></Field>
+      <Field label="Litros autorizados *"><input type="number" min="1" value={form.litros} onChange={e=>setForm(f=>({...f,litros:e.target.value}))}/></Field>
+      <Field label="Motivo / actividad *"><input type="text" placeholder="Ej. Rastra en MJ4, jornada nocturna" value={form.motivo} onChange={e=>setForm(f=>({...f,motivo:e.target.value}))}/></Field>
+      {alertaPres&&<div style={{background:'#FAEEDA',border:'1px solid #E5C17A',borderRadius:8,padding:'10px 12px',marginBottom:12,fontSize:13,color:'#854F0B'}}>{alertaPres}</div>}
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setShowNuevo(false)}>Cancelar</Btn><Btn onClick={generar} disabled={saving}>{saving?'Generando...':'Generar vale'}</Btn></div>
+    </Modal>}
+    {cancelV&&<Modal title={`Cancelar ${folioVale(cancelV.id)}`} onClose={()=>setCancelV(null)}>
+      <Field label="Motivo de la cancelación *"><input type="text" value={motivoC} onChange={e=>setMotivoC(e.target.value)} autoFocus/></Field>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setCancelV(null)}>Volver</Btn><Btn color="#A32D2D" onClick={cancelar}>Cancelar vale</Btn></div>
+    </Modal>}
+    {valeImp&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:2000,overflowY:'auto',padding:'24px 12px'}}>
+      <div style={{maxWidth:560,margin:'0 auto',background:'#fff',borderRadius:8,padding:'36px 40px',color:'#1a1a18'}}>
+        <div className="no-print" style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:18}}>
+          <button onClick={()=>window.print()} style={{padding:'8px 18px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:500}}>🖨️ Imprimir / Guardar PDF</button>
+          <button onClick={()=>setPrintV(null)} style={{padding:'8px 18px',borderRadius:8,background:'none',border:'0.5px solid #ccc',cursor:'pointer',fontSize:13}}>Cerrar</button></div>
+        <div style={{textAlign:'center',borderBottom:'2px solid #1D9E75',paddingBottom:14,marginBottom:18}}>
+          <p style={{fontSize:13,color:'#5F5E5A',margin:'0 0 4px'}}>Grupo Molina · Flotilla Jalisco</p>
+          <h1 style={{fontSize:22,margin:'0 0 6px'}}>Vale de carga de combustible</h1>
+          <p style={{fontSize:30,fontWeight:700,margin:0,letterSpacing:'.04em'}}>{folioVale(valeImp.id)}</p></div>
+        <table style={{width:'100%',fontSize:14,borderCollapse:'collapse',marginBottom:18}}><tbody>
+          <tr><td style={{padding:'6px 0',fontWeight:600,width:150}}>Tractor:</td><td>{valeImp.tractor_id}{tractorDe(valeImp.tractor_id)?` — Campo ${tractorDe(valeImp.tractor_id).campo}`:''}</td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Litros autorizados:</td><td><strong>{valeImp.litros_autorizados} L</strong></td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Motivo:</td><td>{valeImp.motivo||'—'}</td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Generado por:</td><td>{valeImp.generado_por}</td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Emitido:</td><td>{fmtFechaHora(valeImp.fecha_emision)}</td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Vigencia hasta:</td><td><strong>{fmtFechaHora(valeImp.vence)}</strong> ({VIGENCIA_VALE_HRS} h)</td></tr>
+          <tr><td style={{padding:'6px 0',fontWeight:600}}>Estado:</td><td><strong>{valeImp._e}</strong></td></tr>
+          {valeImp.ejecutado_por&&<tr><td style={{padding:'6px 0',fontWeight:600}}>Ejecutado por:</td><td>{valeImp.ejecutado_por} · {fmtFechaHora(valeImp.fecha_ejecucion)} · {valeImp.litros_cargados} L</td></tr>}</tbody></table>
+        <p style={{fontSize:12,color:'#5F5E5A'}}>Este vale solo es válido para el tractor indicado y dentro de su vigencia. Debe ejecutarlo una persona distinta a quien lo generó.</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:30,marginTop:48}}>
+          <div style={{textAlign:'center'}}><div style={{borderTop:'1px solid #333',paddingTop:6,fontSize:12}}>Autoriza</div></div>
+          <div style={{textAlign:'center'}}><div style={{borderTop:'1px solid #333',paddingTop:6,fontSize:12}}>Recibe / Despachador</div></div></div>
+      </div></div>}
+  </div>
+}
+
 /* ── App Root ── */
 export default function App(){
   // ── ALL hooks must be declared before any conditional return ──
   const [rol,setRol]=useState(()=>localStorage.getItem('flotilla_rol')||null)
+  const [nombre,setNombre]=useState(()=>localStorage.getItem('flotilla_nombre')||'')
   const [page,setPage]=useState(()=>{
     const r=localStorage.getItem('flotilla_rol')
     if(r==='campo') return 'diesel'
@@ -1632,22 +2384,34 @@ export default function App(){
   const [autorizaciones,setAutorizaciones]=useState([])
   const [presupuestos,setPresupuestos]=useState([])
   const [actividades,setActividades]=useState([])
+  const [mecanicos,setMecanicos]=useState([])
+  const [ordenes,setOrdenes]=useState([])
+  const [avancesOT,setAvancesOT]=useState([])
+  const [vales,setVales]=useState([])
+  const [valeSel,setValeSel]=useState(null)
+  const [tablasOk,setTablasOk]=useState(true)
   const [loading,setLoading]=useState(false)
   const [dbError,setDbError]=useState(null)
 
   const loadAll=useCallback(async()=>{
     setLoading(true)
     try{
-      const [t,d,m,a,p,ac]=await Promise.all([
+      const [t,d,m,a,p,ac,mec,ot,av,vl]=await Promise.all([
         supabase.from('tractores').select('*').order('id'),
         supabase.from('diesel_registros').select('*').order('fecha',{ascending:false}),
         supabase.from('mantenimientos').select('*').order('fecha',{ascending:false}),
         supabase.from('autorizaciones_mtto').select('*').order('fecha',{ascending:false}),
         supabase.from('presupuesto_diesel').select('*'),
         supabase.from('actividades_diarias').select('*').order('fecha',{ascending:false}),
+        supabase.from('mecanicos').select('*').order('nombre'),
+        supabase.from('ordenes_trabajo').select('*').order('fecha',{ascending:true}),
+        supabase.from('avances_ot').select('*').order('created_at',{ascending:false}),
+        supabase.from('vales_diesel').select('*').order('fecha_emision',{ascending:false}),
       ])
       if(t.error||d.error||m.error||a.error){setDbError('No se pudieron cargar los datos.')}
-      else{setTractores(t.data||[]);setDiesel(d.data||[]);setMtto(m.data||[]);setAutorizaciones(a.data||[]);setPresupuestos(p.error?[]:p.data||[]);setActividades(ac.error?[]:ac.data||[])}
+      else{setTractores(t.data||[]);setDiesel(d.data||[]);setMtto(m.data||[]);setAutorizaciones(a.data||[]);setPresupuestos(p.error?[]:p.data||[]);setActividades(ac.error?[]:ac.data||[])
+        setMecanicos(mec.error?[]:mec.data||[]);setOrdenes(ot.error?[]:ot.data||[]);setAvancesOT(av.error?[]:av.data||[]);setVales(vl.error?[]:vl.data||[])
+        setTablasOk(!(mec.error||ot.error||av.error||vl.error))}
     }catch(e){setDbError('Error: '+e.message)}
     setLoading(false)
   },[])
@@ -1667,15 +2431,17 @@ export default function App(){
     }
   },[])
 
-  const handleLogin=(r)=>{
+  const handleLogin=(r,n)=>{
     setRol(r)
+    setNombre(n)
     setPage(ROL_NAV[r][0])
   }
   const handleLogout=()=>{
     localStorage.removeItem('flotilla_rol')
     setRol(null)
+    setNombre('')
     setPage('dashboard')
-    setTractores([]);setDiesel([]);setMtto([]);setAutorizaciones([]);setPresupuestos([]);setActividades([])
+    setTractores([]);setDiesel([]);setMtto([]);setAutorizaciones([]);setPresupuestos([]);setActividades([]);setMecanicos([]);setOrdenes([]);setAvancesOT([]);setVales([])
   }
   // Actualiza lista global de campos con los que existan en la BD
   {
@@ -1687,7 +2453,7 @@ export default function App(){
   const navPermitido=ROL_NAV[rol]||[]
 
   // ── Conditional render AFTER all hooks ──
-  if(!rol) return <LoginScreen onLogin={handleLogin}/>
+  if(!rol||!nombre) return <LoginScreen onLogin={handleLogin}/>
 
 
   if(dbError)return(
@@ -1702,7 +2468,7 @@ export default function App(){
 
   return(
     <div style={{minHeight:'100vh'}}>
-      <div style={{background:'var(--bg)',borderBottom:'0.5px solid var(--border)',position:'sticky',top:0,zIndex:100}}>
+      <div className="no-print" style={{background:'var(--bg)',borderBottom:'0.5px solid var(--border)',position:'sticky',top:0,zIndex:100}}>
         <div style={{maxWidth:1200,margin:'0 auto',padding:'0 20px',display:'flex',alignItems:'center',gap:0}}>
           <div style={{padding:'12px 20px 12px 0',marginRight:20,borderRight:'0.5px solid var(--border)'}}>
             <p style={{margin:0,fontSize:15,fontWeight:700,color:'var(--text)'}}>🚜 FlotillaJAL</p>
@@ -1712,7 +2478,7 @@ export default function App(){
             {NAV.filter(n=>navPermitido.includes(n.id)).map(n=><button key={n.id} onClick={()=>setPage(n.id)} style={{background:'none',border:'none',cursor:'pointer',padding:'14px 12px',fontSize:13,whiteSpace:'nowrap',borderBottom:page===n.id?'2px solid #1D9E75':'2px solid transparent',color:page===n.id?'#0F6E56':'var(--text2)',fontWeight:page===n.id?600:400}}>{n.emoji} {n.label}</button>)}
           </nav>
           <div style={{marginLeft:'auto',paddingLeft:16,display:'flex',gap:8,alignItems:'center'}}>
-            <span style={{fontSize:11,color:ROLES[rol]?.color,background:'var(--bg2)',padding:'3px 10px',borderRadius:20,fontWeight:600,border:`1px solid ${ROLES[rol]?.color}40`}}>● {ROLES[rol]?.label}</span>
+            <span style={{fontSize:11,whiteSpace:'nowrap',flexShrink:0,color:ROLES[rol]?.color,background:'var(--bg2)',padding:'3px 10px',borderRadius:20,fontWeight:600,border:`1px solid ${ROLES[rol]?.color}40`}}>● {ROLES[rol]?.label} · {nombre}</span>
             <button onClick={loadAll} style={{background:'none',border:'0.5px solid var(--border2)',borderRadius:8,padding:'6px 10px',fontSize:12,cursor:'pointer',color:'var(--text2)'}}>↻</button>
             <button onClick={handleLogout} style={{background:'none',border:'0.5px solid #F09595',borderRadius:8,padding:'6px 12px',fontSize:12,cursor:'pointer',color:'#A32D2D',fontWeight:500}}>Salir</button>
           </div>
@@ -1720,7 +2486,9 @@ export default function App(){
       </div>
       <div style={{maxWidth:1200,margin:'0 auto',padding:'24px 20px'}}>
         {page==='dashboard'      && <Dashboard diesel={diesel} tractores={tractores} mtto={mtto}/>}
-        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar}/>}
+        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
+        {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
+        {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
         {page==='reporte'        && <ReporteDiesel diesel={diesel} tractores={tractores}/>}
         {page==='actividades'    && <Actividades actividades={actividades} setActividades={setActividades} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
