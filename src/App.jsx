@@ -5,13 +5,13 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 /* ─── Auth ─── */
 const ROLES = {
   admin:    { password: 'jalisco-admin26',   label: 'Administrador', color: '#534AB7' },
-  campo:    { password: 'jalisco-campo26',    label: 'Campo',         color: '#1D9E75' },
+  programador: { password: 'jalisco-programador26', label: 'Programador', color: '#1D9E75' },
   consulta: { password: 'jalisco-consulta26', label: 'Consulta',      color: '#378ADD' },
 }
 const ROL_NAV = {
   admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  campo:    ['diesel','vales','taller','actividades','mtto','autorizaciones'],
-  consulta: ['dashboard','reporte','vales','taller','analisis'],
+  programador: ['taller','actividades','mtto','autorizaciones'],
+  consulta: ['dashboard','diesel','reporte','vales','taller','analisis'],
 }
 
 function LoginScreen({onLogin}){
@@ -461,7 +461,7 @@ function ReporteDiesel({diesel,tractores}){
 }
 
 /* ── Diesel ── */
-function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,puedeEditar=true,vales=[],setVales,nombre='',valeSel=null,setValeSel}){
+function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,puedeEditar=true,soloVale=false,vales=[],setVales,nombre='',valeSel=null,setValeSel}){
   const hoyStr=()=>new Date().toISOString().split('T')[0]
   const formVacio=()=>({fecha:hoyStr(),tractor_id:'',campo:'',actividad:'',litros:'',horas:'',hectareas:'',operador:'',semana:'',turno:'DIA',odometro_desp_ini:'',odometro_desp_fin:'',horometro_ini:'',horometro_fin:'',vale_id:''})
   const [showForm,setShowForm]=useState(false)
@@ -535,6 +535,7 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
   },[form.tractor_id,form.litros,form.fecha,diesel,presupuestos])
 
   const handleSubmit=async()=>{
+    if(soloVale&&!form.vale_id){alert('Con tu perfil solo puedes cargar diésel con un vale vigente. Selecciona un vale.');return}
     if(!form.tractor_id||!form.litros){alert('Tractor y litros son obligatorios');return}
     if(form.odometro_desp_ini===''||form.odometro_desp_fin===''){alert('Captura el odómetro de la máquina despachadora al inicio y al final de la carga');return}
     if(Number(form.odometro_desp_fin)<Number(form.odometro_desp_ini)){alert('El odómetro final de la despachadora no puede ser menor al inicial');return}
@@ -602,7 +603,7 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
   return <div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
       <h2 style={{fontSize:18,fontWeight:600,margin:0}}>Registro de diesel</h2>
-      {puedeEditar&&<Btn onClick={()=>{setForm(formVacio());setShowForm(true)}} color="#1D9E75">+ Nuevo registro</Btn>}
+      {(puedeEditar||soloVale)&&<Btn onClick={()=>{setForm(formVacio());setShowForm(true)}} color="#1D9E75">{soloVale?'+ Cargar con vale':'+ Nuevo registro'}</Btn>}
     </div>
     <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
       <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'7px 12px'}}>
@@ -631,7 +632,7 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
               <td style={{padding:'8px 10px'}}>{r.actividad}</td>
               <td style={{padding:'8px 10px',fontWeight:600,color:'#1D9E75'}}>{r.litros}</td>
               <td style={{padding:'8px 10px',whiteSpace:'nowrap',fontSize:12}}>{r.odometro_desp_ini!=null?`${r.odometro_desp_ini} → ${r.odometro_desp_fin}`:'-'}</td>
-              <td style={{padding:'8px 10px',whiteSpace:'nowrap',fontSize:12}}>{r.horometro_ini!=null?`${r.horometro_ini} → ${r.horometro_fin??'…'}`:'-'}{abierta&&puedeEditar&&<> <button onClick={()=>{setCerrar(r);setCerrarVal('')}} style={{background:'#FAEEDA',color:'#854F0B',border:'none',borderRadius:4,fontSize:11,padding:'1px 6px',cursor:'pointer'}}>Cerrar jornada</button></>}</td>
+              <td style={{padding:'8px 10px',whiteSpace:'nowrap',fontSize:12}}>{r.horometro_ini!=null?`${r.horometro_ini} → ${r.horometro_fin??'…'}`:'-'}{abierta&&(puedeEditar||soloVale)&&<> <button onClick={()=>{setCerrar(r);setCerrarVal('')}} style={{background:'#FAEEDA',color:'#854F0B',border:'none',borderRadius:4,fontSize:11,padding:'1px 6px',cursor:'pointer'}}>Cerrar jornada</button></>}</td>
               <td style={{padding:'8px 10px'}}>{r.horas||'-'}</td>
               <td style={{padding:'8px 10px'}}>{r.hectareas||'-'}</td>
               <td style={{padding:'8px 10px',color:'#378ADD',fontWeight:500}}>{lhr}</td>
@@ -645,10 +646,11 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
       </table>
     </div>}
     {showForm&&<Modal title="Nuevo registro de diesel" onClose={()=>setShowForm(false)}>
+      {soloVale&&sinVales&&<div style={{background:'#FCEBEB',color:'#A32D2D',borderRadius:8,padding:'10px 12px',marginBottom:12,fontSize:13}}>No hay vales. Pide al administrador que genere uno.</div>}
       {!sinVales&&<div style={{background:'#EEEDFE',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
-        <Field label="🎫 Cargar con vale (opcional)">
+        <Field label={soloVale?'🎫 Vale (obligatorio)':'🎫 Cargar con vale (opcional)'}>
           <select value={form.vale_id} onChange={e=>elegirVale(e.target.value)}>
-            <option value="">Sin vale</option>
+            <option value="">{soloVale?'Selecciona un vale…':'Sin vale'}</option>
             {valesVigentes.map(v=><option key={v.id} value={v.id}>{folioVale(v.id)} · {v.tractor_id} · {v.litros_autorizados} L · vence {fmtFechaHora(v.vence)}</option>)}
           </select>
         </Field>
@@ -1778,12 +1780,12 @@ function AvisoMigracion(){
 /* ── Programación Taller ── */
 const TABS_TALLER={
   admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
-  campo:[['mis','Mis trabajos']],
+  programador:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
   consulta:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
 }
 const PERM_TALLER={
   admin:'Administrador: abre OT, asigna y reprograma trabajos, captura los avances diarios, inicia y termina trabajos y ve todos los reportes.',
-  campo:'Campo (mecánico): ve solo las OT asignadas a su nombre y registra el inicio y fin del tiempo de trabajo. No asigna ni escribe avances.',
+  programador:'Programador: abre OT, asigna y reprograma trabajos, administra mecánicos, inicia y termina trabajos y ve los reportes. Los avances diarios los captura el administrador.',
   consulta:'Consulta: solo lectura de programación, avances, MTBF y desempeño.',
 }
 function perfOT(list,hoy){
@@ -1796,6 +1798,7 @@ function perfOT(list,hoy){
 
 function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,setAvances,tractores,diesel,rol,nombre,loading,tablasOk}){
   const esAdmin=rol==='admin'
+  const puedeProg=rol==='admin'||rol==='programador'
   const tabs=TABS_TALLER[rol]||TABS_TALLER.consulta
   const [tab,setTab]=useState(tabs[0][0])
   const [semana,setSemana]=useState(0)
@@ -1822,7 +1825,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const mecNombre=id=>mecanicos.find(m=>m.id===id)?.nombre||'—'
   const mecsActivos=mecanicos.filter(m=>m.activo!==false)
   const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.fecha>=a&&o.fecha<=b)}
-  const puedeTrabajar=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'&&(esAdmin||(rol==='campo'&&o.mecanico_id===yo))
+  const puedeTrabajar=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'&&puedeProg
   const weekLabel=w=>{const a=addDaysD(thisMon,w*7),b=addDaysD(a,5);const f=d=>d.toLocaleDateString('es-MX',{day:'numeric',month:'short'});return f(a)+' – '+f(b)+(w===0?' (esta semana)':'')}
   const colorEstado=e=>e==='Terminado'?'#1D9E75':e==='En proceso'?'#BA7517':e==='No realizado'?'#A32D2D':'#378ADD'
   const badgeEstado=e=>e==='Terminado'?'success':e==='En proceso'?'warning':e==='No realizado'?'danger':'info'
@@ -1894,12 +1897,12 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
           <strong style={{fontSize:14}}>{weekLabel(semana)}</strong>
           <Btn small outline color="#888" onClick={()=>setSemana(s=>Math.min(0,s+1))} disabled={semana>=0}>→</Btn>
         </div>
-        {esAdmin&&<div style={{display:'flex',gap:8}}>
+        {puedeProg&&<div style={{display:'flex',gap:8}}>
           <Btn outline color="#534AB7" onClick={()=>setShowMec(true)}>👷 Mecánicos</Btn>
           <Btn onClick={()=>{setFForm({mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:hoy,descripcion:'',horas_estimadas:'2'});setNuevo({})}}>+ Abrir OT</Btn>
         </div>}
       </div>
-      {mecsActivos.length===0?<EmptyState msg={esAdmin?'Aún no hay mecánicos. Agrégalos con el botón "👷 Mecánicos".':'Aún no hay mecánicos registrados.'}/>:
+      {mecsActivos.length===0?<EmptyState msg={puedeProg?'Aún no hay mecánicos. Agrégalos con el botón "👷 Mecánicos".':'Aún no hay mecánicos registrados.'}/>:
       <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
         <table style={{width:'100%',minWidth:780,borderCollapse:'collapse',fontSize:13}}>
           <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>
@@ -1912,8 +1915,8 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
                 <div style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>{fmtHrs(lista.filter(o=>o.mecanico_id===m.id).reduce((s,o)=>s+Number(o.horas_estimadas||0),0))} prog.</div></td>
               {DIAS.map((_,i)=>{
                 const f=isoDate(addDaysD(mon,i)), js=lista.filter(o=>o.mecanico_id===m.id&&o.fecha===f)
-                return <td key={i} onClick={()=>{if(esAdmin&&js.length===0){setFForm({mecanico_id:String(m.id),tractor_id:'',tipo:'Correctivo',fecha:f,descripcion:'',horas_estimadas:'2'});setNuevo({})}}}
-                  style={{padding:5,verticalAlign:'top',minWidth:118,borderLeft:'0.5px solid var(--border)',background:f===hoy?'var(--bg2)':'transparent',cursor:esAdmin&&js.length===0?'pointer':'default'}}>
+                return <td key={i} onClick={()=>{if(puedeProg&&js.length===0){setFForm({mecanico_id:String(m.id),tractor_id:'',tipo:'Correctivo',fecha:f,descripcion:'',horas_estimadas:'2'});setNuevo({})}}}
+                  style={{padding:5,verticalAlign:'top',minWidth:118,borderLeft:'0.5px solid var(--border)',background:f===hoy?'var(--bg2)':'transparent',cursor:puedeProg&&js.length===0?'pointer':'default'}}>
                   {js.map(o=><button key={o.id} onClick={e=>{e.stopPropagation();setDetalleId(o.id)}} style={{display:'block',width:'100%',textAlign:'left',background:o.estado==='En proceso'?'#FAEEDA':'var(--bg)',border:'0.5px solid var(--border)',borderLeft:`4px solid ${colorEstado(o.estado)}`,borderRadius:6,padding:'4px 7px',marginBottom:4,cursor:'pointer',fontSize:12,color:'var(--text)'}}>
                     <strong>{o.tractor_id}{o.tipo==='Correctivo'?' ⚠':''}</strong>
                     <div style={{fontSize:10,color:'var(--text3)'}}>{folioOT(o.id)}</div>
@@ -1929,7 +1932,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         {[['Programado','#378ADD'],['En proceso','#BA7517'],['Terminado','#1D9E75'],['No realizado','#A32D2D']].map(([l,c])=><span key={l}><i style={{display:'inline-block',width:10,height:10,borderRadius:3,background:c,marginRight:5}}/>{l}</span>)}
         <span>⚠ Correctivo</span>
       </div>
-      <p style={{fontSize:12,color:'var(--text3)'}}>{esAdmin?'Toca una celda vacía para abrir una OT ese día, o una OT para ver su detalle.':'Toca una OT para ver su detalle y avances.'}</p>
+      <p style={{fontSize:12,color:'var(--text3)'}}>{puedeProg?'Toca una celda vacía para abrir una OT ese día, o una OT para ver su detalle.':'Toca una OT para ver su detalle y avances.'}</p>
     </div>
   }
 
@@ -2125,11 +2128,11 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
       {avances.filter(a=>a.ot_id===detalle.id).length===0?<p style={{fontSize:12,color:'var(--text3)'}}>Sin avances todavía.</p>:
         avances.filter(a=>a.ot_id===detalle.id).sort((a,b)=>(a.created_at||a.fecha)<(b.created_at||b.fecha)?-1:1).map(a=><div key={a.id} style={{border:'0.5px solid var(--border)',borderRadius:8,padding:'8px 10px',marginBottom:6,fontSize:13}}>
           <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>{fmtFechaCorta(a.fecha)} · {a.autor}{a.created_at?' · '+fmtFechaHora(a.created_at):''}</div>{a.texto}</div>)}
-      {esAdmin&&detalle.estado!=='Terminado'&&<div style={{marginTop:10}}>
+      {puedeProg&&detalle.estado!=='Terminado'&&<div style={{marginTop:10}}>
         <Field label="Agregar avance (solo administrador)"><textarea value={mTxt} onChange={e=>setMTxt(e.target.value)} style={{width:'100%',minHeight:60}}/></Field>
         <div style={{display:'flex',justifyContent:'flex-end'}}><Btn small outline color="#1D9E75" onClick={()=>guardarAvance(detalle.id,mTxt,()=>setMTxt(''))}>Guardar avance</Btn></div>
       </div>}
-      {esAdmin&&detalle.estado!=='Terminado'&&<div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
+      {puedeProg&&detalle.estado!=='Terminado'&&<div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
         <h4 style={{fontSize:13,margin:'0 0 8px'}}>Reprogramar</h4>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           <input type="date" value={repro.fecha||detalle.fecha} onChange={e=>setRepro(r=>({...r,fecha:e.target.value}))} style={{width:'auto'}}/>
@@ -2205,7 +2208,7 @@ function horasRestantes(v,ahora){
 
 function Vales({vales,setVales,tractores,diesel,presupuestos,rol,nombre,loading,tablasOk,onEjecutar}){
   const esAdmin=rol==='admin'
-  const puedeGenerar=rol==='admin'||rol==='campo'
+  const puedeGenerar=rol==='admin'
   const [tab,setTab]=useState('lista')
   const [ahora,setAhora]=useState(Date.now())
   useEffect(()=>{const t=setInterval(()=>setAhora(Date.now()),30000);return()=>clearInterval(t)},[])
@@ -2295,7 +2298,7 @@ function Vales({vales,setVales,tractores,diesel,presupuestos,rol,nombre,loading,
         <td style={{padding:'8px 10px',fontSize:12,whiteSpace:'nowrap'}}>{v._e==='Vigente'?`Quedan ${horasRestantes(v,ahora)}`:fmtFechaHora(v.vence)}</td>
         <td style={{padding:'8px 10px',fontSize:12}}>{v.ejecutado_por?`${v.ejecutado_por} · ${fmtFechaHora(v.fecha_ejecucion)}`:'-'}</td>
         <td style={{padding:'8px 10px',whiteSpace:'nowrap'}} className="no-print">{conAcciones&&<div style={{display:'flex',gap:6}}>
-          {v._e==='Vigente'&&rol!=='consulta'&&(mismo?<span style={{fontSize:11,color:'var(--text3)'}}>Lo ejecuta otra persona</span>:<Btn small onClick={()=>onEjecutar(v.id)}>Cargar diesel</Btn>)}
+          {v._e==='Vigente'&&(mismo?<span style={{fontSize:11,color:'var(--text3)'}}>Lo ejecuta otra persona</span>:<Btn small onClick={()=>onEjecutar(v.id)}>Cargar diesel</Btn>)}
           {v._e==='Vigente'&&(esAdmin||mismo)&&<Btn small outline color="#A32D2D" onClick={()=>{setCancelV(v);setMotivoC('')}}>Cancelar</Btn>}
           <Btn small outline color="#378ADD" onClick={()=>setPrintV(v.id)}>🖨️</Btn></div>}</td>
       </tr>})}</tbody></table></div>
@@ -2309,7 +2312,7 @@ function Vales({vales,setVales,tractores,diesel,presupuestos,rol,nombre,loading,
     {!tablasOk&&<AvisoMigracion/>}
     <div style={{display:'flex',gap:2,borderBottom:'0.5px solid var(--border)',marginBottom:14}} className="no-print">{tabBtn('lista',`Vales (${vigentesN} vigentes)`)}{tabBtn('reporte','Reporte de vales efectivos')}</div>
     <div style={{background:'#E6F1FB',color:'#185FA5',borderRadius:8,padding:'8px 12px',fontSize:12,marginBottom:14}} className="no-print">
-      Cada vale tiene folio y vigencia de {VIGENCIA_VALE_HRS} horas. Una persona lo genera y <strong>otra distinta</strong> lo ejecuta al registrar la carga en Diesel. {rol==='consulta'?'Consulta: solo lectura.':''}</div>
+      Cada vale tiene folio y vigencia de {VIGENCIA_VALE_HRS} horas. Una persona lo genera y <strong>otra distinta</strong> lo ejecuta al registrar la carga en Diesel. {rol==='consulta'?'Consulta: puede cargar diésel únicamente con un vale vigente.':''}</div>
     {filtros}
     {loading?<Spinner/>:tab==='lista'?(lista.length===0?<EmptyState msg="Sin vales registrados."/>:tabla(lista,true)):<div>
       <div style={{display:'flex',gap:10,marginBottom:12}} className="no-print">
@@ -2369,7 +2372,7 @@ function Vales({vales,setVales,tractores,diesel,presupuestos,rol,nombre,loading,
 /* ── App Root ── */
 export default function App(){
   // ── ALL hooks must be declared before any conditional return ──
-  const [rol,setRol]=useState(()=>localStorage.getItem('flotilla_rol')||null)
+  const [rol,setRol]=useState(()=>{const r=localStorage.getItem('flotilla_rol');return ROLES[r]?r:null})
   const [nombre,setNombre]=useState(()=>localStorage.getItem('flotilla_nombre')||'')
   const [page,setPage]=useState(()=>{
     const r=localStorage.getItem('flotilla_rol')
@@ -2486,7 +2489,7 @@ export default function App(){
       </div>
       <div style={{maxWidth:1200,margin:'0 auto',padding:'24px 20px'}}>
         {page==='dashboard'      && <Dashboard diesel={diesel} tractores={tractores} mtto={mtto}/>}
-        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
+        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar} soloVale={rol==='consulta'} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
         {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
         {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
