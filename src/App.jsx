@@ -10,7 +10,7 @@ const ROLES = {
 }
 const ROL_NAV = {
   admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  programador: ['reporte','taller','actividades','mtto','autorizaciones'],
+  programador: ['reporte','diesel','taller','actividades','mtto','autorizaciones'],
   consulta: ['dashboard','diesel','reporte','vales','taller','analisis'],
 }
 
@@ -629,14 +629,46 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
     setCerrar(null);setCerrarVal('')
   }
   const ids=[...new Set(tractores.map(t=>t.id))].sort()
-  const rows=diesel.filter(r=>(filterCampo==='Todos'||r.campo===filterCampo)&&(filterTractor==='Todos'||r.tractor_id===filterTractor))
+  const [fDesde,setFDesde]=useState('')
+  const [fHasta,setFHasta]=useState('')
+  const rows=diesel.filter(r=>(filterCampo==='Todos'||r.campo===filterCampo)&&(filterTractor==='Todos'||r.tractor_id===filterTractor)&&(!fDesde||r.fecha>=fDesde)&&(!fHasta||r.fecha<=fHasta))
   const sinVales=vales.length===0
+  const totL=rows.reduce((a,r)=>a+Number(r.litros||0),0), totH=rows.reduce((a,r)=>a+Number(r.horas||0),0), totHa=rows.reduce((a,r)=>a+Number(r.hectareas||0),0)
+  const periodoTxt=(fDesde||fHasta)?`${fDesde||'inicio'} al ${fHasta||'hoy'}`:'Todo el historial'
+  const filtroTxt=`Periodo: ${periodoTxt} · Campo: ${filterCampo} · Tractor: ${filterTractor}`
+  const expCols=['Fecha','Tractor','Campo','Actividad','Litros','Odóm. ini','Odóm. fin','Horóm. ini','Horóm. fin','Horas','Hect.','Lts/Hr','Lts/Ha','Vale','Operador','Turno']
+  const expRows=rows.map(r=>[r.fecha,r.tractor_id,r.campo,r.actividad||'',Number(r.litros||0),r.odometro_desp_ini??'',r.odometro_desp_fin??'',r.horometro_ini??'',r.horometro_fin??'',Number(r.horas||0)||'',Number(r.hectareas||0)||'',r.horas>0?+(r.litros/r.horas).toFixed(1):'',r.hectareas>0?+(r.litros/r.hectareas).toFixed(1):'',r.vale_id?folioVale(r.vale_id):'',r.operador||'',r.turno||''])
+  const expTot=['TOTALES','','','',+totL.toFixed(1),'','','','',+totH.toFixed(1),+totHa.toFixed(1),'','','','','']
+  const nombreArch=`diesel_${new Date().toISOString().split('T')[0]}`
+  const exportExcel=async()=>{
+    const XLSX=await import('xlsx')
+    const ws=XLSX.utils.aoa_to_sheet([['Reporte de diesel — Flotilla Jalisco'],[filtroTxt],[],expCols,...expRows,[],expTot])
+    ws['!cols']=expCols.map((c,i)=>({wch:i===3||i===14?18:11}))
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Diesel');XLSX.writeFile(wb,nombreArch+'.xlsx')
+  }
+  const exportPDF=async()=>{
+    const {jsPDF}=await import('jspdf');const autoTable=(await import('jspdf-autotable')).default
+    const doc=new jsPDF({orientation:'landscape',unit:'pt',format:'letter'})
+    doc.setFontSize(14);doc.text('Reporte de diesel — Flotilla Jalisco',30,32)
+    doc.setFontSize(9);doc.text(filtroTxt+` · Generado: ${new Date().toLocaleString('es-MX')}`,30,48)
+    autoTable(doc,{startY:58,head:[expCols],body:[...expRows,expTot],styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[29,158,117]},didParseCell:d=>{if(d.row.index===expRows.length)d.cell.styles.fontStyle='bold'}})
+    doc.save(nombreArch+'.pdf')
+  }
   return <div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
       <h2 style={{fontSize:18,fontWeight:600,margin:0}}>Registro de diesel</h2>
+      <div className="no-print" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <Btn small outline onClick={()=>window.print()}>🖨️ Imprimir</Btn>
+        <Btn small outline onClick={exportPDF}>📄 PDF</Btn>
+        <Btn small outline onClick={exportExcel}>📊 Excel</Btn>
       {(puedeEditar||soloVale)&&<Btn onClick={()=>{setForm(formVacio());setShowForm(true)}} color="#1D9E75">{soloVale?'+ Cargar con vale':'+ Nuevo registro'}</Btn>}
+      </div>
     </div>
-    <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+    <p className="print-only" style={{margin:'0 0 8px',fontSize:12}}>{filtroTxt} · {rows.length} registros · {totL.toFixed(0)} L</p>
+    <div className="no-print" style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
+      <label style={{fontSize:12,color:'var(--text3)'}}>Desde</label><input type="date" value={fDesde} onChange={e=>setFDesde(e.target.value)} style={{width:'auto',padding:'6px 10px'}}/>
+      <label style={{fontSize:12,color:'var(--text3)'}}>Hasta</label><input type="date" value={fHasta} onChange={e=>setFHasta(e.target.value)} style={{width:'auto',padding:'6px 10px'}}/>
+      {(fDesde||fHasta)&&<button onClick={()=>{setFDesde('');setFHasta('')}} style={{padding:'6px 10px',borderRadius:6,border:'0.5px solid var(--border)',background:'none',cursor:'pointer',fontSize:12}}>Limpiar fechas</button>}
       <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'7px 12px'}}>
         <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
       </select>
@@ -673,6 +705,7 @@ function Diesel({diesel,setDiesel,tractores,presupuestos,qrTractorId,loading,pue
               <td style={{padding:'8px 10px'}}>{puedeEditar&&<button onClick={()=>handleDelete(r)} style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer',fontSize:16}}>🗑</button>}</td>
             </tr>
           })}
+          <tr style={{background:'var(--bg2)',fontWeight:700}}><td colSpan={4} style={{padding:'8px 10px'}}>TOTALES ({rows.length})</td><td style={{padding:'8px 10px',color:'#1D9E75'}}>{totL.toFixed(0)}</td><td colSpan={2}></td><td style={{padding:'8px 10px'}}>{totH.toFixed(1)}</td><td style={{padding:'8px 10px'}}>{totHa.toFixed(1)}</td><td colSpan={5}></td></tr>
         </tbody>
       </table>
     </div>}
@@ -2520,7 +2553,7 @@ export default function App(){
       </div>
       <div style={{maxWidth:1200,margin:'0 auto',padding:'24px 20px'}}>
         {page==='dashboard'      && <Dashboard diesel={diesel} tractores={tractores} mtto={mtto}/>}
-        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar} soloVale={rol==='consulta'} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
+        {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar&&rol!=='programador'} soloVale={rol==='consulta'} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
         {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
         {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
