@@ -10,7 +10,7 @@ const ROLES = {
 }
 const ROL_NAV = {
   admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  programador: ['taller','actividades','mtto','autorizaciones'],
+  programador: ['reporte','taller','actividades','mtto','autorizaciones'],
   consulta: ['dashboard','diesel','reporte','vales','taller','analisis'],
 }
 
@@ -322,7 +322,23 @@ function Presupuesto({tractores,diesel,presupuestos,setPresupuestos,loading,pued
 }
 
 /* ── Reporte de diesel ── */
-function ReporteDiesel({diesel,tractores}){
+function ReporteDiesel({diesel,setDiesel,setVales,tractores,puedeEditar=false}){
+  const [edit,setEdit]=useState(null)
+  const [savingE,setSavingE]=useState(false)
+  const guardarEdit=async()=>{
+    if(edit.litros===''||Number(edit.litros)<=0){alert('Los litros deben ser mayores a 0');return}
+    const num=v=>v===''||v==null?null:Number(v)
+    const patch={fecha:edit.fecha,campo:edit.campo,actividad:edit.actividad,litros:Number(edit.litros),horas:num(edit.horas),hectareas:num(edit.hectareas),operador:edit.operador||null,turno:edit.turno||null}
+    setSavingE(true)
+    const {error}=await supabase.from('diesel_registros').update(patch).eq('id',edit.id)
+    if(error){alert('Error: '+error.message);setSavingE(false);return}
+    if(edit.vale_id){
+      await supabase.from('vales_diesel').update({litros_cargados:patch.litros}).eq('id',edit.vale_id)
+      if(setVales)setVales(vs=>vs.map(v=>v.id===edit.vale_id?{...v,litros_cargados:patch.litros}:v))
+    }
+    setDiesel(d=>d.map(x=>x.id===edit.id?{...x,...patch}:x))
+    setSavingE(false);setEdit(null)
+  }
   const [filterTractor,setFilterTractor]=useState('Todos')
   const [filterCampo,setFilterCampo]=useState('Todos')
   const [filterActividad,setFilterActividad]=useState('Todos')
@@ -434,7 +450,7 @@ function ReporteDiesel({diesel,tractores}){
     <div style={{overflowX:'auto'}}>
       <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
         <thead><tr style={{borderBottom:'0.5px solid var(--border)',background:'var(--bg2)'}}>
-          {['Fecha','Tractor','Campo','Actividad','Litros','Horas','Hect.','Lts/Hr','Lts/Ha','Operador','Turno'].map(h=><th key={h} style={{padding:'7px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap'}}>{h}</th>)}
+          {['Fecha','Tractor','Campo','Actividad','Litros','Horas','Hect.','Lts/Hr','Lts/Ha','Operador','Turno',...(puedeEditar?['']:[])].map(h=><th key={h} style={{padding:'7px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap'}}>{h}</th>)}
         </tr></thead>
         <tbody>
           {rows.map(r=>{
@@ -452,11 +468,26 @@ function ReporteDiesel({diesel,tractores}){
               <td style={{padding:'7px 10px',color:'#534AB7'}}>{lha}</td>
               <td style={{padding:'7px 10px',color:'var(--text2)'}}>{r.operador||'-'}</td>
               <td style={{padding:'7px 10px'}}>{r.turno||'-'}</td>
+              {puedeEditar&&<td style={{padding:'7px 10px'}}><button onClick={()=>setEdit({...r,litros:String(r.litros??''),horas:r.horas??'',hectareas:r.hectareas??'',operador:r.operador||'',turno:r.turno||''})} style={{background:'none',border:'0.5px solid var(--border)',borderRadius:6,color:'#378ADD',cursor:'pointer',fontSize:12,padding:'3px 8px'}}>✏️ Editar</button></td>}
             </tr>
           })}
         </tbody>
       </table>
     </div>}
+    {edit&&<Modal title={`Editar registro · ${edit.tractor_id}`} onClose={()=>setEdit(null)}>
+      {edit.vale_id&&<p style={{fontSize:12,color:'#3C3489',background:'#EEEDFE',borderRadius:8,padding:'8px 10px',marginTop:0}}>Este registro ejecutó un vale; si cambias los litros también se actualizan en el vale.</p>}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="Fecha"><input type="date" value={edit.fecha} onChange={e=>setEdit(x=>({...x,fecha:e.target.value}))}/></Field>
+        <Field label="Campo"><select value={edit.campo||''} onChange={e=>setEdit(x=>({...x,campo:e.target.value}))}>{CAMPOS.map(c=><option key={c}>{c}</option>)}</select></Field>
+        <Field label="Actividad"><select value={edit.actividad||''} onChange={e=>setEdit(x=>({...x,actividad:e.target.value}))}>{[...new Set([edit.actividad,...ACTIVIDADES].filter(Boolean))].map(a=><option key={a}>{a}</option>)}</select></Field>
+        <Field label="Turno"><select value={edit.turno||''} onChange={e=>setEdit(x=>({...x,turno:e.target.value}))}><option value=""></option><option>DIA</option><option>NOCHE</option></select></Field>
+        <Field label="Litros"><input type="number" value={edit.litros} onChange={e=>setEdit(x=>({...x,litros:e.target.value}))}/></Field>
+        <Field label="Horas"><input type="number" value={edit.horas} onChange={e=>setEdit(x=>({...x,horas:e.target.value}))}/></Field>
+        <Field label="Hectáreas"><input type="number" value={edit.hectareas} onChange={e=>setEdit(x=>({...x,hectareas:e.target.value}))}/></Field>
+        <Field label="Operador"><input type="text" value={edit.operador} onChange={e=>setEdit(x=>({...x,operador:e.target.value}))}/></Field>
+      </div>
+      <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}><Btn outline onClick={()=>setEdit(null)}>Cancelar</Btn><Btn onClick={guardarEdit} disabled={savingE}>{savingE?'Guardando…':'Guardar cambios'}</Btn></div>
+    </Modal>}
   </div>
 }
 
@@ -2493,7 +2524,7 @@ export default function App(){
         {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
         {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
-        {page==='reporte'        && <ReporteDiesel diesel={diesel} tractores={tractores}/>}
+        {page==='reporte'        && <ReporteDiesel diesel={diesel} setDiesel={setDiesel} setVales={setVales} tractores={tractores} puedeEditar={rol==='admin'||rol==='programador'}/>}
         {page==='actividades'    && <Actividades actividades={actividades} setActividades={setActividades} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
         {page==='mtto'           && <Mantenimientos mtto={mtto} setMtto={setMtto} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
         {page==='autorizaciones' && <Autorizaciones autorizaciones={autorizaciones} setAutorizaciones={setAutorizaciones} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
