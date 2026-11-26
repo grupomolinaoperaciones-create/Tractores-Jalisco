@@ -9,9 +9,9 @@ const ROLES = {
   consulta: { password: 'jalisco-consulta26', label: 'Consulta',      color: '#378ADD' },
 }
 const ROL_NAV = {
-  admin:    ['dashboard','diesel','vales','taller','espera','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  programador: ['reporte','diesel','taller','espera','actividades','mtto','autorizaciones'],
-  consulta: ['dashboard','diesel','reporte','vales','taller','espera','analisis'],
+  admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
+  programador: ['reporte','diesel','taller','actividades','mtto','autorizaciones'],
+  consulta: ['dashboard','diesel','reporte','vales','taller','analisis'],
 }
 
 function LoginScreen({onLogin}){
@@ -76,7 +76,6 @@ const NAV = [
   {id:'diesel',       label:'Diesel',          emoji:'⛽'},
   {id:'vales',        label:'Vales',           emoji:'🎫'},
   {id:'taller',       label:'Programación Taller', emoji:'🛠️'},
-  {id:'espera',       label:'En espera de refacciones', emoji:'⏳'},
   {id:'presupuesto',  label:'Presupuesto',     emoji:'📋'},
   {id:'reporte',      label:'Reporte',         emoji:'📑'},
   {id:'actividades',  label:'Actividades',     emoji:'📝'},
@@ -1965,9 +1964,9 @@ function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,lo
 
 /* ── Programación Taller ── */
 const TABS_TALLER={
-  admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
-  programador:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
-  consulta:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
+  admin:[['prog','Programación'],['espera','En espera de refacciones'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
+  programador:[['prog','Programación'],['espera','En espera de refacciones'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
+  consulta:[['prog','Programación'],['espera','En espera de refacciones'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
 }
 const PERM_TALLER={
   admin:'Administrador: abre OT, asigna y reprograma trabajos, captura los avances diarios, inicia y termina trabajos y ve todos los reportes.',
@@ -2417,12 +2416,12 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     </div>
   }
 
-  const body={prog:viewProg,mis:viewMis,avances:viewAvances,mtbf:viewMtbf,paros:viewParos,desemp:viewDesemp}[tabAct]()
+  const body={prog:viewProg,espera:()=><EsperaRefacciones ordenes={ordenes} setOrdenes={setOrdenes} mecanicos={mecanicos} tractores={tractores} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>,mis:viewMis,avances:viewAvances,mtbf:viewMtbf,paros:viewParos,desemp:viewDesemp}[tabAct]()
   return <div>
     <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 12px'}}>🛠️ Programación Taller</h2>
     {!tablasOk&&<AvisoMigracion/>}
     <div style={{display:'flex',gap:2,overflowX:'auto',borderBottom:'0.5px solid var(--border)',marginBottom:14}}>
-      {tabs.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 14px',fontSize:13,whiteSpace:'nowrap',borderBottom:tabAct===k?'2px solid #1D9E75':'2px solid transparent',color:tabAct===k?'#0F6E56':'var(--text2)',fontWeight:tabAct===k?600:400}}>{l}</button>)}
+      {tabs.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{background:'none',border:'none',cursor:'pointer',padding:'10px 14px',fontSize:13,whiteSpace:'nowrap',borderBottom:tabAct===k?'2px solid #1D9E75':'2px solid transparent',color:tabAct===k?'#0F6E56':'var(--text2)',fontWeight:tabAct===k?600:400}}>{l}{k==='espera'&&ordenes.filter(o=>o.estado===ESPERA).length>0&&<span style={{marginLeft:6,background:'#A32D2D',color:'#fff',borderRadius:10,fontSize:11,padding:'1px 7px'}}>{ordenes.filter(o=>o.estado===ESPERA).length}</span>}</button>)}
     </div>
     <div style={{background:'#E6F1FB',color:'#185FA5',borderRadius:8,padding:'8px 12px',fontSize:12,marginBottom:14}}>{PERM_TALLER[rol]||PERM_TALLER.consulta}</div>
     {loading?<Spinner/>:body}
@@ -2823,7 +2822,6 @@ export default function App(){
         {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar&&rol!=='programador'} soloVale={rol==='consulta'} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
         {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
         {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} mtto={mtto} setMtto={setMtto}/>}
-        {page==='espera'         && <EsperaRefacciones ordenes={ordenes} setOrdenes={setOrdenes} mecanicos={mecanicos} tractores={tractores} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
         {page==='reporte'        && <ReporteDiesel diesel={diesel} setDiesel={setDiesel} setVales={setVales} tractores={tractores} puedeEditar={rol==='admin'||rol==='programador'}/>}
         {page==='actividades'    && <Actividades actividades={actividades} setActividades={setActividades} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
