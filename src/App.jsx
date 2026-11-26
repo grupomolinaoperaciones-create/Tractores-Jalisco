@@ -2058,7 +2058,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const [semana,setSemana]=useState(0)
   const [semDes,setSemDes]=useState(0)
   const [periodo,setPeriodo]=useState(90)
-  const [pf,setPf]=useState({tractor:'Todos',campo:'Todos',desde:'',hasta:''})
+  const [pf,setPf]=useState({tractor:'Todos',campo:'Todos',desde:'',hasta:'',tipo:'Todos'})
   const [detalleId,setDetalleId]=useState(null)
   const [nuevo,setNuevo]=useState(null)
   const [finId,setFinId]=useState(null)
@@ -2317,35 +2317,46 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   /* ── Vista: tiempos de paro ── */
   const viewParos=()=>{
     const tcampo=Object.fromEntries(tractores.map(t=>[t.id,t.campo]))
-    const lista=ordenes.filter(o=>o.fecha_paro&&(pf.tractor==='Todos'||o.tractor_id===pf.tractor)&&(pf.campo==='Todos'||tcampo[o.tractor_id]===pf.campo)&&(!pf.desde||o.fecha_paro.slice(0,10)>=pf.desde)&&(!pf.hasta||o.fecha_paro.slice(0,10)<=pf.hasta)).map(o=>({o,...segmentosOT(o)})).sort((a,b)=>new Date(b.o.fecha_paro)-new Date(a.o.fecha_paro))
-    const prom=i=>{const v=lista.map(x=>x.segs[i].dias).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
+    const NOW=Date.now()
+    const base=[
+      ...ordenes.filter(o=>o.fecha_paro&&o.tipo!=='Preventivo').map(o=>({o,tipoParo:'Falla',fp:o.fecha_paro,...segmentosOT(o,NOW)})),
+      ...ordenes.filter(o=>o.tipo==='Preventivo'&&o.inicio).map(o=>{const fin=o.estado==='Terminado'&&o.fin?new Date(o.fin).getTime():NOW;return{o,tipoParo:'Programado',fp:o.inicio,segs:null,total:(fin-new Date(o.inicio).getTime())/DIA}})
+    ]
+    const lista=base.filter(x=>(pf.tipo==='Todos'||x.tipoParo===pf.tipo)&&(pf.tractor==='Todos'||x.o.tractor_id===pf.tractor)&&(pf.campo==='Todos'||tcampo[x.o.tractor_id]===pf.campo)&&(!pf.desde||x.fp.slice(0,10)>=pf.desde)&&(!pf.hasta||x.fp.slice(0,10)<=pf.hasta)).sort((a,b)=>new Date(b.fp)-new Date(a.fp))
+    const fallasL=lista.filter(x=>x.tipoParo==='Falla'), progL=lista.filter(x=>x.tipoParo==='Programado')
+    const prom=i=>{const v=fallasL.map(x=>x.segs[i].dias).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
     const parados=lista.filter(x=>x.o.estado!=='Terminado'&&x.o.estado!=='No realizado')
-    const totales=lista.map(x=>x.total).filter(d=>d!=null)
+    const totales=fallasL.map(x=>x.total).filter(d=>d!=null)
+    const hrsProg=progL.reduce((a,x)=>a+(x.total||0)*24,0)
     return <div>
       <div style={{display:'flex',gap:10,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap',background:'var(--bg)',padding:'10px 12px',borderRadius:10,border:'0.5px solid var(--border)'}}>
+        <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Tipo de paro</label><select value={pf.tipo} onChange={e=>setPf(x=>({...x,tipo:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option><option value="Falla">Falla (no programado)</option><option value="Programado">Programado (preventivo)</option></select></div>
         <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Tractor</label><select value={pf.tractor} onChange={e=>setPf(x=>({...x,tractor:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{[...new Set(tractores.map(t=>t.id))].sort().map(t=><option key={t}>{t}</option>)}</select></div>
         <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Campo</label><select value={pf.campo} onChange={e=>setPf(x=>({...x,campo:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}</select></div>
         <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Paro desde</label><input type="date" value={pf.desde} onChange={e=>setPf(x=>({...x,desde:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}/></div>
         <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Paro hasta</label><input type="date" value={pf.hasta} onChange={e=>setPf(x=>({...x,hasta:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}/></div>
-        {(pf.tractor!=='Todos'||pf.campo!=='Todos'||pf.desde||pf.hasta)&&<button onClick={()=>setPf({tractor:'Todos',campo:'Todos',desde:'',hasta:''})} style={{padding:'6px 10px',borderRadius:6,border:'0.5px solid var(--border)',background:'none',cursor:'pointer',fontSize:12}}>Limpiar</button>}
-        <span style={{fontSize:12,color:'var(--text3)'}}>{lista.length} OT</span>
+        {(pf.tractor!=='Todos'||pf.campo!=='Todos'||pf.desde||pf.hasta||pf.tipo!=='Todos')&&<button onClick={()=>setPf({tractor:'Todos',campo:'Todos',desde:'',hasta:'',tipo:'Todos'})} style={{padding:'6px 10px',borderRadius:6,border:'0.5px solid var(--border)',background:'none',cursor:'pointer',fontSize:12}}>Limpiar</button>}
+        <span style={{fontSize:12,color:'var(--text3)'}}>{fallasL.length} fallas · {progL.length} programados</span>
       </div>
       <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
-        <Stat label="Tractores parados hoy" value={parados.length} sub="con OT abierta y fecha de paro" color="#A32D2D"/>
-        <Stat label="Paro promedio total" value={fmtDias(totales.length?totales.reduce((a,b)=>a+b,0)/totales.length:null)} sub="de paro a listo" color="#D85A30"/>
+        <Stat label="Tractores parados hoy" value={parados.length} sub="falla o preventivo en curso" color="#A32D2D"/>
+        <Stat label="Paro por falla (promedio)" value={fmtDias(totales.length?totales.reduce((a,b)=>a+b,0)/totales.length:null)} sub="de paro a listo" color="#D85A30"/>
+        <Stat label="Paro programado" value={fmtHrs(hrsProg)} sub={`${progL.length} preventivos · no cuentan como falla`} color="#7F77DD"/>
         {SEGS.map(([k,l],i)=><Stat key={k} label={l} value={fmtDias(prom(i))} sub="promedio" color={i===4?'#1D9E75':'#378ADD'}/>)}
       </div>
       <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 8px'}}>Solo el último segmento (llegada → listo) se evalúa al taller y a los mecánicos. Los anteriores son tiempos de gestión: requisición, cotización, compra y entrega.</p>
-      {lista.length===0?<EmptyState msg="Aún no hay OT con fecha de paro. Captúrala al abrir una OT correctiva."/>:
+      {lista.length===0?<EmptyState msg="Aún no hay paros con esos filtros. Las fallas se registran con la fecha de paro de la OT correctiva; los preventivos, al iniciar y terminar el trabajo."/>:
       <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['OT','Tractor','Causa','Estado',...SEGS.map(x=>x[1]),'Total parado'].map(h=><th key={h} style={{padding:'9px 8px',textAlign:'left',color:'var(--text2)',fontWeight:500}}>{h}</th>)}</tr></thead>
-          <tbody>{lista.map(({o,segs,total})=><tr key={o.id} onClick={()=>setDetalleId(o.id)} style={{borderBottom:'0.5px solid var(--border)',cursor:'pointer'}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['OT','Tractor','Tipo de paro','Causa','Estado',...SEGS.map(x=>x[1]),'Total parado'].map(h=><th key={h} style={{padding:'9px 8px',textAlign:'left',color:'var(--text2)',fontWeight:500}}>{h}</th>)}</tr></thead>
+          <tbody>{lista.map(({o,segs,total,tipoParo})=><tr key={o.id} onClick={()=>setDetalleId(o.id)} style={{borderBottom:'0.5px solid var(--border)',cursor:'pointer'}}>
             <td style={{padding:'7px 8px',fontWeight:600}}>{folioOT(o.id)}</td><td style={{padding:'7px 8px'}}>{o.tractor_id}</td>
-            <td style={{padding:'7px 8px'}}>{o.causa||'Sin determinar'}</td>
+            <td style={{padding:'7px 8px'}}><Badge color={tipoParo==='Falla'?'danger':'purple'}>{tipoParo==='Falla'?'Falla':'Programado'}</Badge></td>
+            <td style={{padding:'7px 8px'}}>{tipoParo==='Falla'?(o.causa||'Sin determinar'):'—'}</td>
             <td style={{padding:'7px 8px'}}><Badge color={badgeEstado(o.estado)}>{o.estado}</Badge></td>
-            {segs.map(x=><td key={x.k} style={{padding:'7px 8px',background:x.curso?'#FAEEDA':'transparent'}}>{fmtDias(x.dias)}{x.curso?' ⏳':''}</td>)}
-            <td style={{padding:'7px 8px',fontWeight:700,color:'#993C1D'}}>{fmtDias(total)}</td></tr>)}</tbody>
+            {tipoParo==='Falla'?segs.map(x=><td key={x.k} style={{padding:'7px 8px',background:x.curso?'#FAEEDA':'transparent'}}>{fmtDias(x.dias)}{x.curso?' ⏳':''}</td>)
+              :<td colSpan={SEGS.length} style={{padding:'7px 8px',color:'var(--text3)'}}>Preventivo · {o.descripcion}</td>}
+            <td style={{padding:'7px 8px',fontWeight:700,color:tipoParo==='Falla'?'#993C1D':'#534AB7'}}>{tipoParo==='Falla'?fmtDias(total):fmtHrs(total*24)}</td></tr>)}</tbody>
         </table>
       </div>}
     </div>
