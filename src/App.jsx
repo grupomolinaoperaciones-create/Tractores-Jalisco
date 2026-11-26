@@ -9,9 +9,9 @@ const ROLES = {
   consulta: { password: 'jalisco-consulta26', label: 'Consulta',      color: '#378ADD' },
 }
 const ROL_NAV = {
-  admin:    ['dashboard','diesel','vales','taller','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
-  programador: ['reporte','diesel','taller','actividades','mtto','autorizaciones'],
-  consulta: ['dashboard','diesel','reporte','vales','taller','analisis'],
+  admin:    ['dashboard','diesel','vales','taller','espera','presupuesto','reporte','actividades','mtto','autorizaciones','analisis','flotilla','qrcodes'],
+  programador: ['reporte','diesel','taller','espera','actividades','mtto','autorizaciones'],
+  consulta: ['dashboard','diesel','reporte','vales','taller','espera','analisis'],
 }
 
 function LoginScreen({onLogin}){
@@ -76,6 +76,7 @@ const NAV = [
   {id:'diesel',       label:'Diesel',          emoji:'⛽'},
   {id:'vales',        label:'Vales',           emoji:'🎫'},
   {id:'taller',       label:'Programación Taller', emoji:'🛠️'},
+  {id:'espera',       label:'En espera de refacciones', emoji:'⏳'},
   {id:'presupuesto',  label:'Presupuesto',     emoji:'📋'},
   {id:'reporte',      label:'Reporte',         emoji:'📑'},
   {id:'actividades',  label:'Actividades',     emoji:'📝'},
@@ -927,7 +928,7 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
             <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
               <span style={{fontSize:16,fontWeight:700}}>{m.tractor_id}</span>
               {tractor?.campo&&<Badge color="gray">{tractor.campo}</Badge>}
-              <Badge color={tipoColor[m.tipo]||'gray'}>{m.tipo}</Badge>
+              <Badge color={tipoColor[m.tipo]||'gray'}>{m.tipo}</Badge>{m.ot_id&&<Badge color="purple">{folioOT(m.ot_id)}</Badge>}{m.causa&&m.causa!=='Sin determinar'&&m.tipo!=='Preventivo'&&<Badge color="gray">{m.causa}</Badge>}
               <Badge color={estadoColor[m.estado]||'gray'}>{m.estado}</Badge>
             </div>
             <div style={{display:'flex',gap:6,alignItems:'center'}}>
@@ -1851,6 +1852,117 @@ function AvisoMigracion(){
   </div>
 }
 
+/* ── En espera de refacciones ── */
+const ETAPAS_ESP=[
+  {k:'fecha_paro',titulo:'1 · Diagnóstico y requisición',desde:'fecha_paro',sig:'fecha_requisicion',btn:'Registrar requisición',color:'#A32D2D'},
+  {k:'fecha_requisicion',titulo:'2 · Cotización',desde:'fecha_requisicion',sig:'fecha_cotizacion',btn:'Registrar cotización',color:'#BA7517'},
+  {k:'fecha_cotizacion',titulo:'3 · Orden de compra',desde:'fecha_cotizacion',sig:'fecha_oc',btn:'Registrar orden de compra',color:'#378ADD'},
+  {k:'fecha_oc',titulo:'4 · Entrega (en camino)',desde:'fecha_oc',sig:'fecha_llegada',btn:'Llegaron las refacciones',color:'#534AB7'},
+  {k:'fecha_llegada',titulo:'5 · En taller, por programar',desde:'fecha_llegada',sig:null,btn:'Programar mecánico',color:'#1D9E75'},
+]
+function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,loading,tablasOk}){
+  const puedeProg=rol==='admin'||rol==='programador'
+  const esAdmin=rol==='admin'
+  const [ahora,setAhora]=useState(Date.now())
+  useEffect(()=>{const t=setInterval(()=>setAhora(Date.now()),60000);return()=>clearInterval(t)},[])
+  const [filtro,setFiltro]=useState({tractor:'Todos',campo:'Todos'})
+  const [detalleId,setDetalleId]=useState(null)
+  const [envio,setEnvio]=useState(null)
+  const [nuevo,setNuevo]=useState(null)
+  const [saving,setSaving]=useState(false)
+  const hoy=isoDate(new Date())
+  const tractorDe=id=>tractores.find(t=>t.id===id)
+  const mecsActivos=mecanicos.filter(m=>m.activo!==false)
+  const enEspera=ordenes.filter(o=>o.estado===ESPERA&&(filtro.tractor==='Todos'||o.tractor_id===filtro.tractor)&&(filtro.campo==='Todos'||tractorDe(o.tractor_id)?.campo===filtro.campo))
+  const etapaDe=o=>o.fecha_llegada?4:o.fecha_oc?3:o.fecha_cotizacion?2:o.fecha_requisicion?1:0
+  const dias=(a)=>a?(ahora-new Date(a).getTime())/DIA:null
+  const actualizar=async(id,patch)=>{
+    const {data,error}=await supabase.from('ordenes_trabajo').update(patch).eq('id',id).select()
+    if(error){alert('Error: '+error.message);return false}
+    setOrdenes(os=>os.map(o=>o.id===id?{...o,...(data&&data[0]?data[0]:patch)}:o));return true
+  }
+  const avanzar=async(o,et)=>{
+    if(!et.sig){setEnvio({id:o.id,mecanico_id:o.mecanico_id?String(o.mecanico_id):'',fecha:hoy,horas:String(o.horas_estimadas||2)});return}
+    if(await actualizar(o.id,{[et.sig]:new Date().toISOString()})&&et.sig==='fecha_llegada')setEnvio({id:o.id,mecanico_id:o.mecanico_id?String(o.mecanico_id):'',fecha:hoy,horas:String(o.horas_estimadas||2)})
+  }
+  const enviar=async()=>{
+    if(!envio.mecanico_id){alert('Elige el mecánico que hará el trabajo');return}
+    setSaving(true)
+    const ok=await actualizar(envio.id,{estado:'Programado',mecanico_id:Number(envio.mecanico_id),fecha:envio.fecha||hoy,horas_estimadas:Number(envio.horas)||1})
+    setSaving(false);if(ok)setEnvio(null)
+  }
+  const [fN,setFN]=useState({tractor_id:'',descripcion:'',fecha_paro:'',causa:'Sin determinar'})
+  const crear=async()=>{
+    if(!fN.tractor_id||!fN.descripcion.trim()){alert('Tractor y descripción son obligatorios');return}
+    setSaving(true)
+    const row={tractor_id:fN.tractor_id,tipo:'Correctivo',descripcion:fN.descripcion.trim(),estado:ESPERA,requiere_refacciones:true,fecha_paro:deLocal(fN.fecha_paro)||new Date().toISOString(),causa:fN.causa,creado_por:nombre,horas_estimadas:2}
+    const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
+    setSaving(false)
+    if(error){alert('Error: '+error.message);return}
+    setOrdenes(os=>[...os,data[0]]);setNuevo(null)
+  }
+  const detalle=ordenes.find(o=>o.id===detalleId)
+  const parados=enEspera.length
+  const proms=ETAPAS_ESP.map((et,i)=>{const v=enEspera.filter(o=>etapaDe(o)===i).map(o=>dias(o[et.desde])).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null})
+  const totProm=enEspera.length?enEspera.reduce((s,o)=>s+(dias(o.fecha_paro)||0),0)/enEspera.length:null
+  if(!tablasOk&&!loading)return <AvisoMigracion/>
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6,flexWrap:'wrap',gap:8}}>
+      <h2 style={{fontSize:18,fontWeight:600,margin:0}}>⏳ En espera de refacciones</h2>
+      {puedeProg&&<Btn onClick={()=>{setFN({tractor_id:'',descripcion:'',fecha_paro:aLocal(new Date().toISOString()),causa:'Sin determinar'});setNuevo({})}}>+ Reportar paro</Btn>}
+    </div>
+    <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 12px'}}>Tractores parados que esperan requisición, cotización, compra o entrega. Aquí el taller aún no se evalúa. Al llegar las refacciones se envían a <strong>Programación Taller</strong> con un mecánico asignado.</p>
+    <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:14}}>
+      <Stat label="Tractores en espera" value={parados} sub="sin refacciones en taller" color="#A32D2D"/>
+      <Stat label="Parado en promedio" value={fmtDias(totProm)} sub="desde el paro" color="#D85A30"/>
+      <Stat label="Listos para programar" value={enEspera.filter(o=>etapaDe(o)===4).length} sub="refacciones ya en taller" color="#1D9E75"/>
+    </div>
+    <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+      <select value={filtro.tractor} onChange={e=>setFiltro(x=>({...x,tractor:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{[...new Set(tractores.map(t=>t.id))].sort().map(t=><option key={t}>{t}</option>)}</select>
+      <select value={filtro.campo} onChange={e=>setFiltro(x=>({...x,campo:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}</select>
+    </div>
+    {loading?<Spinner/>:<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(215px,1fr))',gap:12,alignItems:'start'}}>
+      {ETAPAS_ESP.map((et,i)=>{const col=enEspera.filter(o=>etapaDe(o)===i).sort((a,b)=>new Date(a.fecha_paro||0)-new Date(b.fecha_paro||0));return <div key={et.k} style={{background:'var(--bg2)',borderRadius:12,padding:10,borderTop:'3px solid '+et.color}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:8}}><strong style={{fontSize:12}}>{et.titulo}</strong><span style={{fontSize:11,color:'var(--text3)'}}>{col.length}{proms[i]!=null?` · prom ${fmtDias(proms[i])}`:''}</span></div>
+        {col.length===0&&<p style={{fontSize:12,color:'var(--text3)',margin:'8px 2px'}}>Sin tractores.</p>}
+        {col.map(o=>{const t=tractorDe(o.tractor_id);const dEt=dias(o[et.desde]),dTot=dias(o.fecha_paro);return <div key={o.id} style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'8px 10px',marginBottom:8}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:6}}><strong>{o.tractor_id}</strong><span style={{fontSize:11,color:'var(--text3)'}}>{folioOT(o.id)}</span></div>
+          <div style={{fontSize:11,color:'var(--text3)'}}>{t?.campo||''}{o.causa&&o.causa!=='Sin determinar'?` · ${o.causa}`:''}</div>
+          <p style={{fontSize:12,margin:'4px 0 6px'}}>{o.descripcion}</p>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}><Badge color="warning">En esta etapa {fmtDias(dEt)}</Badge><Badge color="danger">Parado {fmtDias(dTot)}</Badge></div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {puedeProg&&<Btn small color={et.color} onClick={()=>avanzar(o,et)}>{et.btn}</Btn>}
+            <Btn small outline color="#888" onClick={()=>setDetalleId(o.id)}>{puedeProg?'Fechas y causa':'Ver'}</Btn>
+          </div></div>})}
+      </div>})}
+    </div>}
+
+    {nuevo&&<Modal title="Reportar tractor parado" onClose={()=>setNuevo(null)}>
+      <p style={{fontSize:12,color:'var(--text3)',margin:'-8px 0 12px'}}>Se abre una OT correctiva en espera de refacciones (OT-xxxxx). El mecánico se asigna cuando lleguen.</p>
+      <Field label="Tractor *"><select value={fN.tractor_id} onChange={e=>setFN(f=>({...f,tractor_id:e.target.value}))}><option value="">Seleccionar...</option>{tractores.map(t=><option key={t.id} value={t.id}>{t.id} · {t.campo}</option>)}</select></Field>
+      <Field label="Falla / trabajo a realizar *"><input type="text" value={fN.descripcion} onChange={e=>setFN(f=>({...f,descripcion:e.target.value}))} placeholder="Ej. Falla de bomba hidráulica"/></Field>
+      <Field label="Día y hora del paro"><input type="datetime-local" value={fN.fecha_paro} onChange={e=>setFN(f=>({...f,fecha_paro:e.target.value}))}/></Field>
+      <Field label="Causa probable"><select value={fN.causa} onChange={e=>setFN(f=>({...f,causa:e.target.value}))}>{CAUSAS.map(c=><option key={c}>{c}</option>)}</select></Field>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setNuevo(null)}>Cancelar</Btn><Btn onClick={crear} disabled={saving}>{saving?'Guardando...':'Reportar paro'}</Btn></div>
+    </Modal>}
+
+    {detalle&&<Modal title={`${folioOT(detalle.id)} · ${detalle.tractor_id}`} onClose={()=>setDetalleId(null)} wide>
+      <p style={{margin:'-6px 0 6px',fontSize:14}}>{detalle.descripcion}</p>
+      <PanelParo key={detalle.id} o={detalle} puedeProg={puedeProg} esAdmin={esAdmin} nombre={nombre} guardar={patch=>actualizar(detalle.id,patch)}/>
+    </Modal>}
+
+    {envio&&<Modal title={`Enviar ${folioOT(envio.id)} a Programación`} onClose={()=>setEnvio(null)}>
+      <p style={{fontSize:12,color:'var(--text3)',margin:'-8px 0 12px'}}>Las refacciones ya están en taller. Desde aquí el trabajo entra a la programación y se evalúa a los mecánicos y al taller.</p>
+      <Field label="Mecánico *"><select value={envio.mecanico_id} onChange={e=>setEnvio(x=>({...x,mecanico_id:e.target.value}))}><option value="">Seleccionar...</option>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="Día de trabajo"><input type="date" value={envio.fecha} onChange={e=>setEnvio(x=>({...x,fecha:e.target.value}))}/></Field>
+        <Field label="Horas estimadas"><input type="number" min="0.5" step="0.5" value={envio.horas} onChange={e=>setEnvio(x=>({...x,horas:e.target.value}))}/></Field>
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setEnvio(null)}>Después</Btn><Btn onClick={enviar} disabled={saving}>{saving?'Enviando...':'Enviar a Programación'}</Btn></div>
+    </Modal>}
+  </div>
+}
+
 /* ── Programación Taller ── */
 const TABS_TALLER={
   admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
@@ -1865,6 +1977,7 @@ const PERM_TALLER={
 /* ── Paro y refacciones: tiempos por segmento ── */
 const SEGS=[['fecha_paro','Paro → requisición'],['fecha_requisicion','Requisición → cotización'],['fecha_cotizacion','Cotización → orden de compra'],['fecha_oc','Orden de compra → llegada (entrega)'],['fecha_llegada','Llegada de refacciones → listo (trabajo)']]
 const DIA=864e5
+const ESPERA='En espera de refacciones'
 // Una OT se evalúa (mecánicos y taller) solo cuando ya llegaron las refacciones, si las requiere
 const evaluable=o=>!o.requiere_refacciones||!!o.fecha_llegada
 function segmentosOT(o,ahora=Date.now()){
@@ -1938,7 +2051,7 @@ function perfOT(listAll,hoy){
   return{asig:deb.length,fin:fin.length,real,est,cump:deb.length?fin.length/deb.length:null,efi:real?est/real:null,corr:fin.filter(o=>o.tipo==='Correctivo').length,espera:listAll.length-list.length,diasTrab:dt.length?dt.reduce((a,b)=>a+b,0)/dt.length:null}
 }
 
-function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,setAvances,tractores,diesel,rol,nombre,loading,tablasOk}){
+function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,setAvances,tractores,diesel,rol,nombre,loading,tablasOk,mtto=[],setMtto}){
   const esAdmin=rol==='admin'
   const puedeProg=rol==='admin'||rol==='programador'
   const tabs=TABS_TALLER[rol]||TABS_TALLER.consulta
@@ -1946,6 +2059,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const [semana,setSemana]=useState(0)
   const [semDes,setSemDes]=useState(0)
   const [periodo,setPeriodo]=useState(90)
+  const [pf,setPf]=useState({tractor:'Todos',campo:'Todos',desde:'',hasta:''})
   const [detalleId,setDetalleId]=useState(null)
   const [nuevo,setNuevo]=useState(null)
   const [finId,setFinId]=useState(null)
@@ -1967,7 +2081,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const thisMon=mondayOfD(new Date())
   const mecNombre=id=>mecanicos.find(m=>m.id===id)?.nombre||'—'
   const mecsActivos=mecanicos.filter(m=>m.activo!==false)
-  const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.fecha>=a&&o.fecha<=b)}
+  const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.estado!==ESPERA&&o.fecha>=a&&o.fecha<=b)}
   const puedeTrabajar=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'&&puedeProg
   const weekLabel=w=>{const a=addDaysD(thisMon,w*7),b=addDaysD(a,5);const f=d=>d.toLocaleDateString('es-MX',{day:'numeric',month:'short'});return f(a)+' – '+f(b)+(w===0?' (esta semana)':'')}
   const colorEstado=e=>e==='Terminado'?'#1D9E75':e==='En proceso'?'#BA7517':e==='No realizado'?'#A32D2D':'#378ADD'
@@ -1989,7 +2103,15 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     const ot=ordenes.find(x=>x.id===finId)
     if(ot&&ot.tipo==='Correctivo'&&(ot.causa||'Sin determinar')==='Sin determinar'){alert('Antes de terminar un correctivo define la causa de la falla (en el detalle de la OT).');return}
     setSaving(true)
-    const ok=await actualizarOT(finId,{estado:'Terminado',horas_reales:h,fin:new Date().toISOString()})
+    const finIso=new Date().toISOString()
+    const ok=await actualizarOT(finId,{estado:'Terminado',horas_reales:h,fin:finIso})
+    if(ok&&ot&&setMtto&&!mtto.some(m=>m.ot_id===ot.id)){
+      const seg=segmentosOT({...ot,estado:'Terminado',fin:finIso})
+      const row={fecha:finIso.slice(0,10),tractor_id:ot.tractor_id,tipo:ot.tipo,descripcion:ot.descripcion,tecnico:mecNombre(ot.mecanico_id),estado:'Completado',mano_obra:0,refacciones:0,observaciones:`Generado desde ${folioOT(ot.id)}. Captura los costos.`,fotos:[],causa:ot.causa||'Sin determinar',causa_detalle:ot.causa_detalle||null,ot_id:ot.id,dias_paro:seg.total!=null?Math.round(seg.total*10)/10:null,horas_reales:h}
+      const {data:mm,error:em}=await supabase.from('mantenimientos').insert([row]).select()
+      if(em)alert('La OT se terminó, pero no se pudo crear el registro en Mantenimiento: '+em.message)
+      else if(mm&&mm[0])setMtto(x=>[mm[0],...x])
+    }
     setSaving(false)
     if(ok){setFinId(null)}
   }
@@ -1999,13 +2121,15 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     setHorasReales(String(el));setFinId(id)
   }
   const guardarOT=async()=>{
-    if(!fForm.mecanico_id||!fForm.tractor_id||!fForm.descripcion.trim()){alert('Mecánico, tractor y trabajo a realizar son obligatorios');return}
+    const espera=fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones
+    if((!espera&&!fForm.mecanico_id)||!fForm.tractor_id||!fForm.descripcion.trim()){alert(espera?'Tractor y trabajo a realizar son obligatorios':'Mecánico, tractor y trabajo a realizar son obligatorios');return}
     setSaving(true)
-    const row={mecanico_id:Number(fForm.mecanico_id),tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:fForm.fecha||hoy,descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:'Programado',creado_por:nombre,requiere_refacciones:fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones,fecha_paro:fForm.tipo==='Correctivo'?deLocal(fForm.fecha_paro):null,causa:'Sin determinar'}
+    const row={mecanico_id:fForm.mecanico_id?Number(fForm.mecanico_id):null,tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:espera?(fForm.fecha||null):(fForm.fecha||hoy),descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:espera?ESPERA:'Programado',creado_por:nombre,requiere_refacciones:fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones,fecha_paro:fForm.tipo==='Correctivo'?deLocal(fForm.fecha_paro):null,causa:'Sin determinar'}
     const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
     setSaving(false)
     if(error){alert('Error: '+error.message);return}
     setOrdenes(os=>[...os,data[0]])
+    if(espera){setNuevo(null);alert(`${folioOT(data[0].id)} quedó en el módulo "En espera de refacciones". Al llegar las refacciones se envía a Programación.`);return}
     const d=new Date((row.fecha)+'T12:00:00')
     setSemana(Math.min(0,Math.round((mondayOfD(d)-thisMon)/6048e5)))
     setNuevo(null)
@@ -2193,16 +2317,19 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
 
   /* ── Vista: tiempos de paro ── */
   const viewParos=()=>{
-    const desde=periodo?isoDate(addDaysD(new Date(),-periodo)):'0000-00-00'
-    const lista=ordenes.filter(o=>o.fecha_paro&&o.fecha>=desde).map(o=>({o,...segmentosOT(o)})).sort((a,b)=>new Date(b.o.fecha_paro)-new Date(a.o.fecha_paro))
+    const tcampo=Object.fromEntries(tractores.map(t=>[t.id,t.campo]))
+    const lista=ordenes.filter(o=>o.fecha_paro&&(pf.tractor==='Todos'||o.tractor_id===pf.tractor)&&(pf.campo==='Todos'||tcampo[o.tractor_id]===pf.campo)&&(!pf.desde||o.fecha_paro.slice(0,10)>=pf.desde)&&(!pf.hasta||o.fecha_paro.slice(0,10)<=pf.hasta)).map(o=>({o,...segmentosOT(o)})).sort((a,b)=>new Date(b.o.fecha_paro)-new Date(a.o.fecha_paro))
     const prom=i=>{const v=lista.map(x=>x.segs[i].dias).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
     const parados=lista.filter(x=>x.o.estado!=='Terminado'&&x.o.estado!=='No realizado')
     const totales=lista.map(x=>x.total).filter(d=>d!=null)
     return <div>
-      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
-        <span style={{fontSize:13,color:'var(--text2)'}}>Periodo:</span>
-        <select value={periodo} onChange={e=>setPeriodo(Number(e.target.value))} style={{width:'auto'}}>
-          <option value={30}>Últimos 30 días</option><option value={60}>Últimos 60 días</option><option value={90}>Últimos 90 días</option><option value={180}>Últimos 180 días</option><option value={0}>Todo el historial</option></select>
+      <div style={{display:'flex',gap:10,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap',background:'var(--bg)',padding:'10px 12px',borderRadius:10,border:'0.5px solid var(--border)'}}>
+        <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Tractor</label><select value={pf.tractor} onChange={e=>setPf(x=>({...x,tractor:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{[...new Set(tractores.map(t=>t.id))].sort().map(t=><option key={t}>{t}</option>)}</select></div>
+        <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Campo</label><select value={pf.campo} onChange={e=>setPf(x=>({...x,campo:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}><option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}</select></div>
+        <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Paro desde</label><input type="date" value={pf.desde} onChange={e=>setPf(x=>({...x,desde:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}/></div>
+        <div><label style={{fontSize:11,color:'var(--text3)',display:'block'}}>Paro hasta</label><input type="date" value={pf.hasta} onChange={e=>setPf(x=>({...x,hasta:e.target.value}))} style={{width:'auto',padding:'6px 10px'}}/></div>
+        {(pf.tractor!=='Todos'||pf.campo!=='Todos'||pf.desde||pf.hasta)&&<button onClick={()=>setPf({tractor:'Todos',campo:'Todos',desde:'',hasta:''})} style={{padding:'6px 10px',borderRadius:6,border:'0.5px solid var(--border)',background:'none',cursor:'pointer',fontSize:12}}>Limpiar</button>}
+        <span style={{fontSize:12,color:'var(--text3)'}}>{lista.length} OT</span>
       </div>
       <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
         <Stat label="Tractores parados hoy" value={parados.length} sub="con OT abierta y fecha de paro" color="#A32D2D"/>
@@ -2303,7 +2430,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     {nuevo&&<Modal title="Abrir orden de trabajo (OT)" onClose={()=>setNuevo(null)}>
       <p style={{fontSize:12,color:'var(--text3)',margin:'-8px 0 12px'}}>Al guardar se genera el folio de la OT (OT-00001, OT-00002...).</p>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
-        <Field label="Mecánico *"><select value={fForm.mecanico_id} onChange={e=>setFForm(f=>({...f,mecanico_id:e.target.value}))}><option value="">Seleccionar...</option>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field>
+        <Field label={fForm.tipo==="Correctivo"&&fForm.requiere_refacciones?"Mecánico (opcional)":"Mecánico *"}><select value={fForm.mecanico_id} onChange={e=>setFForm(f=>({...f,mecanico_id:e.target.value}))}><option value="">Seleccionar...</option>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field>
         <Field label="Tractor *"><select value={fForm.tractor_id} onChange={e=>setFForm(f=>({...f,tractor_id:e.target.value}))}><option value="">Seleccionar...</option>{tractores.map(t=><option key={t.id} value={t.id}>{t.id} · {t.campo}</option>)}</select></Field>
         <Field label="Tipo"><select value={fForm.tipo} onChange={e=>setFForm(f=>({...f,tipo:e.target.value}))}><option>Correctivo</option><option>Preventivo</option></select></Field>
         <Field label="Día"><input type="date" value={fForm.fecha} onChange={e=>setFForm(f=>({...f,fecha:e.target.value}))}/></Field>
@@ -2312,7 +2439,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
       <Field label="Horas estimadas"><input type="number" min="0.5" step="0.5" value={fForm.horas_estimadas} onChange={e=>setFForm(f=>({...f,horas_estimadas:e.target.value}))}/></Field>
       {fForm.tipo==='Correctivo'&&<div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
         <Field label="Día y hora del paro del tractor"><input type="datetime-local" value={fForm.fecha_paro} onChange={e=>setFForm(f=>({...f,fecha_paro:e.target.value}))}/></Field>
-        <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13}}><input type="checkbox" checked={fForm.requiere_refacciones} onChange={e=>setFForm(f=>({...f,requiere_refacciones:e.target.checked}))}/> Requiere refacciones (se evalúa al taller desde que llegan)</label>
+        <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13}}><input type="checkbox" checked={fForm.requiere_refacciones} onChange={e=>setFForm(f=>({...f,requiere_refacciones:e.target.checked}))}/> Requiere refacciones: la OT pasa a "En espera de refacciones" hasta que lleguen</label>
         <p style={{fontSize:11,color:'var(--text3)',margin:'6px 0 0'}}>La causa de la falla, la requisición, cotización y orden de compra se registran en el detalle de la OT.</p>
       </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setNuevo(null)}>Cancelar</Btn><Btn onClick={guardarOT} disabled={saving}>{saving?'Guardando...':'Abrir OT'}</Btn></div>
@@ -2342,6 +2469,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
           <select value={repro.mecanico_id||detalle.mecanico_id} onChange={e=>setRepro(r=>({...r,mecanico_id:e.target.value}))} style={{width:'auto'}}>{mecsActivos.map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select>
           <Btn small outline color="#534AB7" onClick={async()=>{if(await actualizarOT(detalle.id,{fecha:repro.fecha||detalle.fecha,mecanico_id:Number(repro.mecanico_id||detalle.mecanico_id),estado:detalle.estado==='No realizado'?'Programado':detalle.estado}))setRepro({fecha:'',mecanico_id:''})}}>Guardar cambio</Btn>
           {detalle.estado==='Programado'&&<Btn small outline color="#A32D2D" onClick={()=>actualizarOT(detalle.id,{estado:'No realizado'})}>Marcar no realizado</Btn>}
+          {detalle.tipo==='Correctivo'&&(detalle.estado==='Programado'||detalle.estado==='En proceso')&&<Btn small outline color="#BA7517" onClick={async()=>{if(confirm('¿Mandar esta OT a "En espera de refacciones"? Saldrá de la programación hasta que lleguen.')){if(await actualizarOT(detalle.id,{estado:ESPERA,requiere_refacciones:true,fecha_llegada:null,inicio:null}))setDetalleId(null)}}}>⏳ Mandar a espera de refacciones</Btn>}
         </div>
       </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:16,flexWrap:'wrap'}}>
@@ -2694,7 +2822,8 @@ export default function App(){
         {page==='dashboard'      && <Dashboard diesel={diesel} tractores={tractores} mtto={mtto}/>}
         {page==='diesel'         && <Diesel diesel={diesel} setDiesel={setDiesel} tractores={tractores} presupuestos={presupuestos} qrTractorId={qrTractorId} loading={loading} puedeEditar={puedeEditar&&rol!=='programador'} soloVale={rol==='consulta'} vales={vales} setVales={setVales} nombre={nombre} valeSel={valeSel} setValeSel={setValeSel}/>}
         {page==='vales'          && <Vales vales={vales} setVales={setVales} tractores={tractores} diesel={diesel} presupuestos={presupuestos} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} onEjecutar={id=>{setValeSel(id);setPage('diesel')}}/>}
-        {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
+        {page==='taller'         && <ProgramacionTaller mecanicos={mecanicos} setMecanicos={setMecanicos} ordenes={ordenes} setOrdenes={setOrdenes} avances={avancesOT} setAvances={setAvancesOT} tractores={tractores} diesel={diesel} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk} mtto={mtto} setMtto={setMtto}/>}
+        {page==='espera'         && <EsperaRefacciones ordenes={ordenes} setOrdenes={setOrdenes} mecanicos={mecanicos} tractores={tractores} rol={rol} nombre={nombre} loading={loading} tablasOk={tablasOk}/>}
         {page==='presupuesto'    && <Presupuesto tractores={tractores} diesel={diesel} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading} puedeEditar={puedeEditar}/>}
         {page==='reporte'        && <ReporteDiesel diesel={diesel} setDiesel={setDiesel} setVales={setVales} tractores={tractores} puedeEditar={rol==='admin'||rol==='programador'}/>}
         {page==='actividades'    && <Actividades actividades={actividades} setActividades={setActividades} tractores={tractores} loading={loading} puedeEditar={puedeEditar}/>}
