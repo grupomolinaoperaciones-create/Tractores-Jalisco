@@ -65,6 +65,8 @@ const CAMPOS = [...CAMPOS_BASE]
 const NUEVO_CAMPO = '__nuevo__'
 const ACTIVIDADES = ['Aplicación','Rastrillo','Fumigación','Batanga','Transporte','Mantenimiento','Remolque','Otro']
 const TIPOS_MTTO = ['Preventivo','Correctivo','Emergencia']
+const CAUSAS = ['Sin determinar','Desgaste normal','Mantenimiento deficiente o vencido','Mala operación','Defecto de fábrica o refacción','Condiciones de campo']
+const SUBCAUSAS_OP = ['Falta de capacitación','Descuido del operador','Sobrecarga ordenada por el campo','Otro']
 const COLORS = ['#1D9E75','#378ADD','#D85A30','#BA7517','#534AB7','#D4537E','#639922','#E24B4A']
 const CAMPO_COLORS = {'MJ1-2':'#1D9E75',MJ3:'#378ADD',MJ4:'#D85A30',MJ5:'#534AB7',MJ6:'#BA7517',MJ8:'#D4537E','MJ Varios':'#639922',MJ9:'#0E7C86',MJ10:'#A0522D'}
 const ESTADOS_AUTORIZACION = ['Pendiente','Autorizado','Rechazado']
@@ -802,12 +804,12 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
   const [filterEstado,setFilterEstado]=useState('Todos')
   const [fotoPreviews,setFotoPreviews]=useState([])
   const [pendingFiles,setPendingFiles]=useState([])
-  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:''}
+  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:'',causa:'Sin determinar',causa_detalle:''}
   const [form,setForm]=useState(emptyForm)
   const openNew=()=>{setEditId(null);setForm(emptyForm);setFotoPreviews([]);setPendingFiles([]);setShowForm(true)}
   const openEdit=(m)=>{
     setEditId(m.id)
-    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||''})
+    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',causa:m.causa||'Sin determinar',causa_detalle:m.causa_detalle||''})
     setFotoPreviews(m.fotos||[])
     setPendingFiles([])
     setShowForm(true)
@@ -827,7 +829,8 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
     const existingUrls=fotoPreviews.filter(u=>!u.startsWith('blob:'))
     const uploadedUrls=pendingFiles.length>0?await uploadFotos(pendingFiles):[]
     const allFotos=[...existingUrls,...uploadedUrls]
-    const row={...form,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
+    const esCorr=form.tipo!=='Preventivo'
+    const row={...form,causa:esCorr?form.causa:'Sin determinar',causa_detalle:esCorr&&form.causa==='Mala operación'?(form.causa_detalle||null):null,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
     if(editId){
       const {error}=await supabase.from('mantenimientos').update(row).eq('id',editId)
       if(error){alert('Error: '+error.message)}
@@ -965,6 +968,13 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
         <Field label="Tipo"><select value={form.tipo} onChange={e=>setForm(f=>({...f,tipo:e.target.value}))}>{TIPOS_MTTO.map(t=><option key={t}>{t}</option>)}</select></Field>
         <Field label="Estado"><select value={form.estado} onChange={e=>setForm(f=>({...f,estado:e.target.value}))}>{['En proceso','Completado','Pendiente','Cancelado'].map(s=><option key={s}>{s}</option>)}</select></Field>
       </div>
+      {form.tipo!=='Preventivo'&&<div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+          <Field label="Causa de la falla"><select value={form.causa} onChange={e=>setForm(f=>({...f,causa:e.target.value}))}>{CAUSAS.map(c=><option key={c}>{c}</option>)}</select></Field>
+          {form.causa==='Mala operación'&&<Field label="Motivo"><select value={form.causa_detalle} onChange={e=>setForm(f=>({...f,causa_detalle:e.target.value}))}><option value="">Seleccionar…</option>{SUBCAUSAS_OP.map(c=><option key={c}>{c}</option>)}</select></Field>}
+        </div>
+        <p style={{fontSize:11,color:'var(--text3)',margin:0}}>Un correctivo por mala operación sigue contando como correctivo; la causa solo permite analizarlo por separado.</p>
+      </div>}
       <Field label="Descripción *"><textarea value={form.descripcion} rows={2} onChange={e=>setForm(f=>({...f,descripcion:e.target.value}))} style={{resize:'vertical'}}/></Field>
       <Field label="Técnico"><input type="text" placeholder="Nombre del técnico" value={form.tecnico} onChange={e=>setForm(f=>({...f,tecnico:e.target.value}))}/></Field>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
@@ -1843,21 +1853,89 @@ function AvisoMigracion(){
 
 /* ── Programación Taller ── */
 const TABS_TALLER={
-  admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
-  programador:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
-  consulta:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['desemp','Desempeño semanal']],
+  admin:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
+  programador:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
+  consulta:[['prog','Programación'],['avances','Avances diarios'],['mtbf','MTBF por tractor'],['paros','Tiempos de paro'],['desemp','Desempeño semanal']],
 }
 const PERM_TALLER={
   admin:'Administrador: abre OT, asigna y reprograma trabajos, captura los avances diarios, inicia y termina trabajos y ve todos los reportes.',
   programador:'Programador: abre OT, asigna y reprograma trabajos, administra mecánicos, inicia y termina trabajos y ve los reportes. Los avances diarios los captura el administrador.',
   consulta:'Consulta: solo lectura de programación, avances, MTBF y desempeño.',
 }
-function perfOT(list,hoy){
+/* ── Paro y refacciones: tiempos por segmento ── */
+const SEGS=[['fecha_paro','Paro → requisición'],['fecha_requisicion','Requisición → cotización'],['fecha_cotizacion','Cotización → orden de compra'],['fecha_oc','Orden de compra → llegada (entrega)'],['fecha_llegada','Llegada de refacciones → listo (trabajo)']]
+const DIA=864e5
+// Una OT se evalúa (mecánicos y taller) solo cuando ya llegaron las refacciones, si las requiere
+const evaluable=o=>!o.requiere_refacciones||!!o.fecha_llegada
+function segmentosOT(o,ahora=Date.now()){
+  const t=k=>o[k]?new Date(o[k]).getTime():null
+  const fin=o.estado==='Terminado'&&o.fin?new Date(o.fin).getTime():null
+  const pts=[t('fecha_paro'),t('fecha_requisicion'),t('fecha_cotizacion'),t('fecha_oc'),t('fecha_llegada'),fin]
+  let curso=false
+  const segs=SEGS.map(([k,label],i)=>{
+    const a=pts[i], b=pts[i+1]
+    if(a!=null&&b!=null&&b>=a)return{k,label,dias:(b-a)/DIA,curso:false}
+    if(a!=null&&b==null&&!curso&&o.estado!=='Terminado'&&o.estado!=='No realizado'){curso=true;return{k,label,dias:(ahora-a)/DIA,curso:true}}
+    return{k,label,dias:null,curso:false}
+  })
+  const ini=pts[0], fn=fin??(o.estado==='Terminado'||o.estado==='No realizado'?null:ahora)
+  return{segs,total:ini!=null&&fn!=null?(fn-ini)/DIA:null}
+}
+const fmtDias=d=>d==null||isNaN(d)?'—':(Math.round(d*10)/10).toLocaleString('es-MX')+' d'
+const aLocal=s=>{if(!s)return '';const d=new Date(s);if(isNaN(d))return '';const z=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return z.toISOString().slice(0,16)}
+const deLocal=v=>v?new Date(v).toISOString():null
+
+function PanelParo({o,puedeProg,esAdmin,nombre,guardar}){
+  const [f,setF]=useState(()=>({requiere_refacciones:!!o.requiere_refacciones,fecha_paro:aLocal(o.fecha_paro),fecha_requisicion:aLocal(o.fecha_requisicion),fecha_cotizacion:aLocal(o.fecha_cotizacion),fecha_oc:aLocal(o.fecha_oc),fecha_llegada:aLocal(o.fecha_llegada)}))
+  const [c,setC]=useState(()=>({causa:o.causa||'Sin determinar',causa_detalle:o.causa_detalle||''}))
+  const [ahora,setAhora]=useState(Date.now())
+  useEffect(()=>{const t=setInterval(()=>setAhora(Date.now()),60000);return()=>clearInterval(t)},[])
+  const seg=segmentosOT({...o,...Object.fromEntries(['fecha_paro','fecha_requisicion','fecha_cotizacion','fecha_oc','fecha_llegada'].map(k=>[k,deLocal(f[k])]))},ahora)
+  const cerrada=o.estado==='Terminado'
+  const edita=puedeProg&&!cerrada
+  const fechas=[['fecha_paro','Día y hora del paro'],['fecha_requisicion','Requisición'],['fecha_cotizacion','Cotización'],['fecha_oc','Orden de compra'],['fecha_llegada','Llegada de refacciones al taller']]
+  const orden=fechas.map(([k])=>f[k]?new Date(f[k]).getTime():null).filter(x=>x!=null)
+  const desorden=orden.some((x,i)=>i>0&&x<orden[i-1])
+  const guardarFechas=()=>{
+    if(desorden){alert('Las fechas deben ir en orden: paro, requisición, cotización, orden de compra y llegada.');return}
+    guardar({requiere_refacciones:f.requiere_refacciones,fecha_paro:deLocal(f.fecha_paro),fecha_requisicion:deLocal(f.fecha_requisicion),fecha_cotizacion:deLocal(f.fecha_cotizacion),fecha_oc:deLocal(f.fecha_oc),fecha_llegada:deLocal(f.fecha_llegada)})
+  }
+  const causaPatch=()=>({causa:c.causa,causa_detalle:c.causa==='Mala operación'?(c.causa_detalle||null):null,causa_confirmada_por:null,causa_confirmada_fecha:null})
+  return <div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
+    <h4 style={{fontSize:13,margin:'0 0 8px'}}>🕒 Paro y refacciones</h4>
+    <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13,marginBottom:8}}><input type="checkbox" disabled={!edita} checked={f.requiere_refacciones} onChange={e=>setF(x=>({...x,requiere_refacciones:e.target.checked}))}/> Requiere refacciones (el taller se evalúa desde que llegan)</label>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:'0 12px'}}>
+      {fechas.map(([k,l])=><Field key={k} label={l}><div style={{display:'flex',gap:6}}><input type="datetime-local" disabled={!edita} value={f[k]} onChange={e=>setF(x=>({...x,[k]:e.target.value}))}/>{edita&&!f[k]&&<button onClick={()=>setF(x=>({...x,[k]:aLocal(new Date().toISOString())}))} style={{whiteSpace:'nowrap',padding:'0 8px',border:'0.5px solid var(--border2)',borderRadius:6,background:'var(--bg)',fontSize:11,cursor:'pointer'}}>Ahora</button>}</div></Field>)}
+    </div>
+    {edita&&<div style={{display:'flex',justifyContent:'flex-end',marginBottom:8}}><Btn small outline color="#1D9E75" onClick={guardarFechas}>Guardar fechas</Btn></div>}
+    {desorden&&<p style={{fontSize:12,color:'#A32D2D',margin:'0 0 8px'}}>Las fechas no van en orden cronológico.</p>}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8,marginBottom:6}}>
+      {seg.segs.map(x=><div key={x.k} style={{border:'0.5px solid var(--border)',borderRadius:8,padding:'6px 8px',background:x.curso?'#FAEEDA':'var(--bg)'}}>
+        <div style={{fontSize:10,color:'var(--text3)'}}>{x.label}</div>
+        <div style={{fontSize:15,fontWeight:600}}>{fmtDias(x.dias)}{x.curso&&<span style={{fontSize:10,color:'#BA7517'}}> en curso</span>}</div></div>)}
+      <div style={{border:'1px solid #D85A30',borderRadius:8,padding:'6px 8px',background:'#FAECE7'}}><div style={{fontSize:10,color:'#993C1D'}}>Total del tractor parado</div><div style={{fontSize:15,fontWeight:700,color:'#993C1D'}}>{fmtDias(seg.total)}</div></div>
+    </div>
+    {o.tipo==='Correctivo'&&<div style={{marginTop:12}}>
+      <h4 style={{fontSize:13,margin:'0 0 8px'}}>🔎 Causa de la falla</h4>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        <select disabled={!edita} value={c.causa} onChange={e=>setC(x=>({...x,causa:e.target.value}))} style={{width:'auto'}}>{CAUSAS.map(x=><option key={x}>{x}</option>)}</select>
+        {c.causa==='Mala operación'&&<select disabled={!edita} value={c.causa_detalle} onChange={e=>setC(x=>({...x,causa_detalle:e.target.value}))} style={{width:'auto'}}><option value="">Motivo…</option>{SUBCAUSAS_OP.map(x=><option key={x}>{x}</option>)}</select>}
+        {edita&&<Btn small outline color="#1D9E75" onClick={()=>{if(c.causa==='Mala operación'&&!c.causa_detalle){alert('Indica el motivo de la mala operación');return}guardar(causaPatch())}}>Guardar causa</Btn>}
+      </div>
+      <p style={{fontSize:12,margin:'6px 0 0',color:'var(--text2)'}}>{o.causa_confirmada_por?<>✅ Confirmada por <strong>{o.causa_confirmada_por}</strong>{o.causa_confirmada_fecha?' · '+fmtFechaHora(o.causa_confirmada_fecha):''}</>:<>Pendiente de confirmar por el administrador.{(o.causa||'Sin determinar')==='Sin determinar'?' Se requiere definir la causa antes de terminar la OT.':''}</>}</p>
+      {esAdmin&&!o.causa_confirmada_por&&(o.causa||'Sin determinar')!=='Sin determinar'&&<div style={{marginTop:6}}><Btn small color="#534AB7" onClick={()=>guardar({causa_confirmada_por:nombre,causa_confirmada_fecha:new Date().toISOString()})}>Confirmar causa</Btn></div>}
+    </div>}
+  </div>
+}
+
+function perfOT(listAll,hoy){
+  const list=listAll.filter(evaluable)
   const deb=list.filter(o=>o.fecha<hoy||o.estado==='Terminado')
   const fin=list.filter(o=>o.estado==='Terminado')
   const est=fin.reduce((s,o)=>s+Number(o.horas_estimadas||0),0)
   const real=fin.reduce((s,o)=>s+Number(o.horas_reales||0),0)
-  return{asig:deb.length,fin:fin.length,real,est,cump:deb.length?fin.length/deb.length:null,efi:real?est/real:null,corr:fin.filter(o=>o.tipo==='Correctivo').length}
+  const dt=fin.filter(o=>o.fecha_llegada&&o.fin).map(o=>(new Date(o.fin)-new Date(o.fecha_llegada))/DIA)
+  return{asig:deb.length,fin:fin.length,real,est,cump:deb.length?fin.length/deb.length:null,efi:real?est/real:null,corr:fin.filter(o=>o.tipo==='Correctivo').length,espera:listAll.length-list.length,diasTrab:dt.length?dt.reduce((a,b)=>a+b,0)/dt.length:null}
 }
 
 function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,setAvances,tractores,diesel,rol,nombre,loading,tablasOk}){
@@ -1879,7 +1957,8 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const [avOT,setAvOT]=useState('')
   const [mTxt,setMTxt]=useState('')
   const [nuevoMec,setNuevoMec]=useState('')
-  const [fForm,setFForm]=useState({mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2'})
+  const FF0={mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2',requiere_refacciones:false,fecha_paro:'',causa:'Sin determinar'}
+  const [fForm,setFForm]=useState(FF0)
   const [horasReales,setHorasReales]=useState('')
   const [repro,setRepro]=useState({fecha:'',mecanico_id:''})
 
@@ -1900,10 +1979,15 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     setOrdenes(os=>os.map(o=>o.id===id?{...o,...(data&&data[0]?data[0]:patch)}:o))
     return true
   }
-  const iniciar=async id=>{await actualizarOT(id,{estado:'En proceso',inicio:new Date().toISOString()})}
+  const iniciar=async id=>{
+    const o=ordenes.find(x=>x.id===id)
+    if(o&&o.requiere_refacciones&&!o.fecha_llegada){alert('Esta OT espera refacciones. Registra la llegada de refacciones al taller antes de iniciar el trabajo.');return}
+    await actualizarOT(id,{estado:'En proceso',inicio:new Date().toISOString()})}
   const terminar=async()=>{
     const h=Number(horasReales)
     if(!(h>0)){alert('Captura las horas reales de trabajo');return}
+    const ot=ordenes.find(x=>x.id===finId)
+    if(ot&&ot.tipo==='Correctivo'&&(ot.causa||'Sin determinar')==='Sin determinar'){alert('Antes de terminar un correctivo define la causa de la falla (en el detalle de la OT).');return}
     setSaving(true)
     const ok=await actualizarOT(finId,{estado:'Terminado',horas_reales:h,fin:new Date().toISOString()})
     setSaving(false)
@@ -1917,7 +2001,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const guardarOT=async()=>{
     if(!fForm.mecanico_id||!fForm.tractor_id||!fForm.descripcion.trim()){alert('Mecánico, tractor y trabajo a realizar son obligatorios');return}
     setSaving(true)
-    const row={mecanico_id:Number(fForm.mecanico_id),tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:fForm.fecha||hoy,descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:'Programado',creado_por:nombre}
+    const row={mecanico_id:Number(fForm.mecanico_id),tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:fForm.fecha||hoy,descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:'Programado',creado_por:nombre,requiere_refacciones:fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones,fecha_paro:fForm.tipo==='Correctivo'?deLocal(fForm.fecha_paro):null,causa:'Sin determinar'}
     const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
     setSaving(false)
     if(error){alert('Error: '+error.message);return}
@@ -1963,7 +2047,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         </div>
         {puedeProg&&<div style={{display:'flex',gap:8}}>
           <Btn outline color="#534AB7" onClick={()=>setShowMec(true)}>👷 Mecánicos</Btn>
-          <Btn onClick={()=>{setFForm({mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:hoy,descripcion:'',horas_estimadas:'2'});setNuevo({})}}>+ Abrir OT</Btn>
+          <Btn onClick={()=>{setFForm({...FF0,fecha:hoy,fecha_paro:aLocal(new Date().toISOString())});setNuevo({})}}>+ Abrir OT</Btn>
         </div>}
       </div>
       {mecsActivos.length===0?<EmptyState msg={puedeProg?'Aún no hay mecánicos. Agrégalos con el botón "👷 Mecánicos".':'Aún no hay mecánicos registrados.'}/>:
@@ -1979,7 +2063,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
                 <div style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>{fmtHrs(lista.filter(o=>o.mecanico_id===m.id).reduce((s,o)=>s+Number(o.horas_estimadas||0),0))} prog.</div></td>
               {DIAS.map((_,i)=>{
                 const f=isoDate(addDaysD(mon,i)), js=lista.filter(o=>o.mecanico_id===m.id&&o.fecha===f)
-                return <td key={i} onClick={()=>{if(puedeProg&&js.length===0){setFForm({mecanico_id:String(m.id),tractor_id:'',tipo:'Correctivo',fecha:f,descripcion:'',horas_estimadas:'2'});setNuevo({})}}}
+                return <td key={i} onClick={()=>{if(puedeProg&&js.length===0){setFForm({...FF0,mecanico_id:String(m.id),fecha:f,fecha_paro:aLocal(new Date().toISOString())});setNuevo({})}}}
                   style={{padding:5,verticalAlign:'top',minWidth:118,borderLeft:'0.5px solid var(--border)',background:f===hoy?'var(--bg2)':'transparent',cursor:puedeProg&&js.length===0?'pointer':'default'}}>
                   {js.map(o=><button key={o.id} onClick={e=>{e.stopPropagation();setDetalleId(o.id)}} style={{display:'block',width:'100%',textAlign:'left',background:o.estado==='En proceso'?'#FAEEDA':'var(--bg)',border:'0.5px solid var(--border)',borderLeft:`4px solid ${colorEstado(o.estado)}`,borderRadius:6,padding:'4px 7px',marginBottom:4,cursor:'pointer',fontSize:12,color:'var(--text)'}}>
                     <strong>{o.tractor_id}{o.tipo==='Correctivo'?' ⚠':''}</strong>
@@ -2085,12 +2169,59 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
             <td style={{padding:'8px 10px',fontWeight:600,color:cls(r.disp)}}>{fmtPct(r.disp)}</td></tr>)}</tbody>
         </table>
       </div>
+      {(()=>{
+        const fs=ordenes.filter(o=>o.tipo==='Correctivo'&&o.estado==='Terminado'&&o.fecha>=desde)
+        if(!fs.length)return null
+        const porC={};fs.forEach(o=>{const k=o.causa||'Sin determinar';porC[k]=(porC[k]||0)+1})
+        const nMala=porC['Mala operación']||0
+        const mtbfSin=sN-nMala>0?sOp/(sN-nMala):null
+        const sub={};fs.filter(o=>o.causa==='Mala operación').forEach(o=>{const k=o.causa_detalle||'Sin motivo';sub[k]=(sub[k]||0)+1})
+        return <div style={{marginTop:14}}><Card title="Fallas por causa">
+          {Object.entries(porC).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} style={{display:'grid',gridTemplateColumns:'minmax(140px,230px) 1fr 70px',gap:10,alignItems:'center',fontSize:13,margin:'6px 0'}}><span>{k}</span><div style={{height:12,background:'var(--bg2)',borderRadius:4}}><div style={{width:(v/fs.length*100)+'%',height:'100%',borderRadius:4,background:k==='Mala operación'?'#A32D2D':'#378ADD'}}/></div><span style={{textAlign:'right',fontWeight:600}}>{v} · {fmtPct(v/fs.length)}</span></div>)}
+          {nMala>0&&<p style={{fontSize:12,color:'var(--text2)',margin:'10px 0 0'}}>Mala operación: {Object.entries(sub).map(([k,v])=>`${k} (${v})`).join(', ')}.</p>}
+          <p style={{fontSize:12,color:'var(--text2)',margin:'8px 0 0'}}><strong>MTBF de la flota sin fallas por mala operación:</strong> {fmtHrs(mtbfSin)} (con ellas: {fmtHrs(fMtbf)}). Las fallas por mala operación sí cuentan en el MTBF; esta cifra las separa para distinguir calidad del equipo de calidad de operación.</p>
+        </Card></div>
+      })()}
       <div style={{marginTop:14}}><Card title="Cómo se calcula">
         <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>MTBF</strong> (tiempo medio entre fallas) = horas operadas ÷ número de fallas. Más alto = más confiable.</p>
         <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>MTTR</strong> (tiempo medio de reparación) = horas reales de las OT correctivas ÷ número de fallas.</p>
         <p style={{fontSize:12,color:'var(--text2)',margin:'0 0 6px'}}><strong>Disponibilidad</strong> = MTBF ÷ (MTBF + MTTR). Rojo bajo 90%, amarillo bajo 95%.</p>
         <p style={{fontSize:12,color:'var(--text3)',margin:0}}>Las horas operadas salen de las horas registradas en Diesel (horómetro final − inicial). Un tractor sin horas o sin fallas muestra "—".</p>
       </Card></div>
+    </div>
+  }
+
+  /* ── Vista: tiempos de paro ── */
+  const viewParos=()=>{
+    const desde=periodo?isoDate(addDaysD(new Date(),-periodo)):'0000-00-00'
+    const lista=ordenes.filter(o=>o.fecha_paro&&o.fecha>=desde).map(o=>({o,...segmentosOT(o)})).sort((a,b)=>new Date(b.o.fecha_paro)-new Date(a.o.fecha_paro))
+    const prom=i=>{const v=lista.map(x=>x.segs[i].dias).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
+    const parados=lista.filter(x=>x.o.estado!=='Terminado'&&x.o.estado!=='No realizado')
+    const totales=lista.map(x=>x.total).filter(d=>d!=null)
+    return <div>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+        <span style={{fontSize:13,color:'var(--text2)'}}>Periodo:</span>
+        <select value={periodo} onChange={e=>setPeriodo(Number(e.target.value))} style={{width:'auto'}}>
+          <option value={30}>Últimos 30 días</option><option value={60}>Últimos 60 días</option><option value={90}>Últimos 90 días</option><option value={180}>Últimos 180 días</option><option value={0}>Todo el historial</option></select>
+      </div>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
+        <Stat label="Tractores parados hoy" value={parados.length} sub="con OT abierta y fecha de paro" color="#A32D2D"/>
+        <Stat label="Paro promedio total" value={fmtDias(totales.length?totales.reduce((a,b)=>a+b,0)/totales.length:null)} sub="de paro a listo" color="#D85A30"/>
+        {SEGS.map(([k,l],i)=><Stat key={k} label={l} value={fmtDias(prom(i))} sub="promedio" color={i===4?'#1D9E75':'#378ADD'}/>)}
+      </div>
+      <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 8px'}}>Solo el último segmento (llegada → listo) se evalúa al taller y a los mecánicos. Los anteriores son tiempos de gestión: requisición, cotización, compra y entrega.</p>
+      {lista.length===0?<EmptyState msg="Aún no hay OT con fecha de paro. Captúrala al abrir una OT correctiva."/>:
+      <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['OT','Tractor','Causa','Estado',...SEGS.map(x=>x[1]),'Total parado'].map(h=><th key={h} style={{padding:'9px 8px',textAlign:'left',color:'var(--text2)',fontWeight:500}}>{h}</th>)}</tr></thead>
+          <tbody>{lista.map(({o,segs,total})=><tr key={o.id} onClick={()=>setDetalleId(o.id)} style={{borderBottom:'0.5px solid var(--border)',cursor:'pointer'}}>
+            <td style={{padding:'7px 8px',fontWeight:600}}>{folioOT(o.id)}</td><td style={{padding:'7px 8px'}}>{o.tractor_id}</td>
+            <td style={{padding:'7px 8px'}}>{o.causa||'Sin determinar'}</td>
+            <td style={{padding:'7px 8px'}}><Badge color={badgeEstado(o.estado)}>{o.estado}</Badge></td>
+            {segs.map(x=><td key={x.k} style={{padding:'7px 8px',background:x.curso?'#FAEEDA':'transparent'}}>{fmtDias(x.dias)}{x.curso?' ⏳':''}</td>)}
+            <td style={{padding:'7px 8px',fontWeight:700,color:'#993C1D'}}>{fmtDias(total)}</td></tr>)}</tbody>
+        </table>
+      </div>}
     </div>
   }
 
@@ -2128,7 +2259,9 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         <Stat label="Eficiencia del taller" value={fmtPct(avgE)} sub="horas estimadas ÷ reales (promedio)" color="#378ADD"/>
         <Stat label="OT terminadas" value={`${team.fin} de ${team.asig}`} sub={`${team.corr} correctivas`} color="#534AB7"/>
         <Stat label="Horas trabajadas" value={fmtHrs(team.real)} sub={`${fmtHrs(team.est)} estimadas`} color="#D85A30"/>
+        <Stat label="Días de trabajo" value={fmtDias(team.diasTrab)} sub="llegada de refacciones → listo" color="#0F6E56"/>
       </div>
+      {team.espera>0&&<div style={{background:'#FAEEDA',color:'#854F0B',borderRadius:8,padding:'8px 12px',fontSize:12,marginBottom:14}}>⏳ {team.espera} OT de esta semana esperan refacciones: no cuentan en el cumplimiento ni en la eficiencia hasta que lleguen al taller.</div>}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:14,marginBottom:14}}>
         <Card title="Cumplimiento por mecánico"><p style={{fontSize:11,color:'var(--text3)',margin:'-6px 0 4px'}}>La línea negra es el promedio del taller.</p>{per.map(p=>bar(p.m.nombre,p.cump,1,avgC))}</Card>
         <Card title="Eficiencia por mecánico"><p style={{fontSize:11,color:'var(--text3)',margin:'-6px 0 4px'}}>100% = tardó lo estimado. Más es mejor.</p>{per.map(p=>bar(p.m.nombre,p.efi,1.5,avgE))}</Card>
@@ -2157,7 +2290,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     </div>
   }
 
-  const body={prog:viewProg,mis:viewMis,avances:viewAvances,mtbf:viewMtbf,desemp:viewDesemp}[tabAct]()
+  const body={prog:viewProg,mis:viewMis,avances:viewAvances,mtbf:viewMtbf,paros:viewParos,desemp:viewDesemp}[tabAct]()
   return <div>
     <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 12px'}}>🛠️ Programación Taller</h2>
     {!tablasOk&&<AvisoMigracion/>}
@@ -2177,13 +2310,18 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
       </div>
       <Field label="Trabajo a realizar *"><input type="text" placeholder="Ej. Cambio de bomba hidráulica" value={fForm.descripcion} onChange={e=>setFForm(f=>({...f,descripcion:e.target.value}))}/></Field>
       <Field label="Horas estimadas"><input type="number" min="0.5" step="0.5" value={fForm.horas_estimadas} onChange={e=>setFForm(f=>({...f,horas_estimadas:e.target.value}))}/></Field>
+      {fForm.tipo==='Correctivo'&&<div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
+        <Field label="Día y hora del paro del tractor"><input type="datetime-local" value={fForm.fecha_paro} onChange={e=>setFForm(f=>({...f,fecha_paro:e.target.value}))}/></Field>
+        <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13}}><input type="checkbox" checked={fForm.requiere_refacciones} onChange={e=>setFForm(f=>({...f,requiere_refacciones:e.target.checked}))}/> Requiere refacciones (se evalúa al taller desde que llegan)</label>
+        <p style={{fontSize:11,color:'var(--text3)',margin:'6px 0 0'}}>La causa de la falla, la requisición, cotización y orden de compra se registran en el detalle de la OT.</p>
+      </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setNuevo(null)}>Cancelar</Btn><Btn onClick={guardarOT} disabled={saving}>{saving?'Guardando...':'Abrir OT'}</Btn></div>
     </Modal>}
 
     {detalle&&<Modal title={`${folioOT(detalle.id)} · ${detalle.tractor_id}`} onClose={()=>{setDetalleId(null);setMTxt('')}} wide>
       <p style={{margin:'-6px 0 10px',fontSize:14}}>{detalle.descripcion}</p>
       <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
-        <Badge color={badgeEstado(detalle.estado)}>{detalle.estado}</Badge><Badge color={detalle.tipo==='Correctivo'?'danger':'gray'}>{detalle.tipo}</Badge>
+        <Badge color={badgeEstado(detalle.estado)}>{detalle.estado}</Badge><Badge color={detalle.tipo==='Correctivo'?'danger':'gray'}>{detalle.tipo}</Badge>{!evaluable(detalle)&&<Badge color="warning">Esperando refacciones</Badge>}
         <span style={{fontSize:12,color:'var(--text2)'}}>{mecNombre(detalle.mecanico_id)} · {fmtFechaCorta(detalle.fecha)} · Estimado {fmtHrs(detalle.horas_estimadas)}{detalle.horas_reales!=null?` · Real ${fmtHrs(detalle.horas_reales)}`:''}</span>
       </div>
       {detalle.estado==='En proceso'&&detalle.inicio&&<div style={{marginBottom:10}}>⏱ Tiempo de trabajo: <Timer inicio={detalle.inicio}/></div>}
@@ -2196,6 +2334,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         <Field label="Agregar avance (solo administrador)"><textarea value={mTxt} onChange={e=>setMTxt(e.target.value)} style={{width:'100%',minHeight:60}}/></Field>
         <div style={{display:'flex',justifyContent:'flex-end'}}><Btn small outline color="#1D9E75" onClick={()=>guardarAvance(detalle.id,mTxt,()=>setMTxt(''))}>Guardar avance</Btn></div>
       </div>}
+      {(detalle.tipo==='Correctivo'||detalle.requiere_refacciones)&&<PanelParo key={detalle.id} o={detalle} puedeProg={puedeProg} esAdmin={esAdmin} nombre={nombre} guardar={patch=>actualizarOT(detalle.id,patch)}/>}
       {puedeProg&&detalle.estado!=='Terminado'&&<div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
         <h4 style={{fontSize:13,margin:'0 0 8px'}}>Reprogramar</h4>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
