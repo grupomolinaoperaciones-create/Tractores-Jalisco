@@ -804,12 +804,12 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
   const [filterEstado,setFilterEstado]=useState('Todos')
   const [fotoPreviews,setFotoPreviews]=useState([])
   const [pendingFiles,setPendingFiles]=useState([])
-  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:'',causa:'Sin determinar',causa_detalle:''}
+  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:'',causa:'Sin determinar',causa_detalle:'',proveedor:''}
   const [form,setForm]=useState(emptyForm)
   const openNew=()=>{setEditId(null);setForm(emptyForm);setFotoPreviews([]);setPendingFiles([]);setShowForm(true)}
   const openEdit=(m)=>{
     setEditId(m.id)
-    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',causa:m.causa||'Sin determinar',causa_detalle:m.causa_detalle||''})
+    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',causa:m.causa||'Sin determinar',causa_detalle:m.causa_detalle||'',proveedor:m.proveedor||''})
     setFotoPreviews(m.fotos||[])
     setPendingFiles([])
     setShowForm(true)
@@ -830,7 +830,7 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
     const uploadedUrls=pendingFiles.length>0?await uploadFotos(pendingFiles):[]
     const allFotos=[...existingUrls,...uploadedUrls]
     const esCorr=form.tipo!=='Preventivo'
-    const row={...form,causa:esCorr?form.causa:'Sin determinar',causa_detalle:esCorr&&form.causa==='Mala operación'?(form.causa_detalle||null):null,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
+    const row={...form,proveedor:form.proveedor||null,causa:esCorr?form.causa:'Sin determinar',causa_detalle:esCorr&&form.causa==='Mala operación'?(form.causa_detalle||null):null,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
     if(editId){
       const {error}=await supabase.from('mantenimientos').update(row).eq('id',editId)
       if(error){alert('Error: '+error.message)}
@@ -976,7 +976,10 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
         <p style={{fontSize:11,color:'var(--text3)',margin:0}}>Un correctivo por mala operación sigue contando como correctivo; la causa solo permite analizarlo por separado.</p>
       </div>}
       <Field label="Descripción *"><textarea value={form.descripcion} rows={2} onChange={e=>setForm(f=>({...f,descripcion:e.target.value}))} style={{resize:'vertical'}}/></Field>
-      <Field label="Técnico"><input type="text" placeholder="Nombre del técnico" value={form.tecnico} onChange={e=>setForm(f=>({...f,tecnico:e.target.value}))}/></Field>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="Técnico"><input type="text" placeholder="Nombre del técnico" value={form.tecnico} onChange={e=>setForm(f=>({...f,tecnico:e.target.value}))}/></Field>
+        <Field label="Proveedor / taller externo (si aplica)"><input type="text" placeholder="Si fue mano de obra externa" value={form.proveedor} onChange={e=>setForm(f=>({...f,proveedor:e.target.value}))}/></Field>
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
         <Field label="Mano de obra ($)"><input type="number" placeholder="0" value={form.mano_obra} onChange={e=>setForm(f=>({...f,mano_obra:e.target.value}))}/></Field>
         <Field label="Refacciones ($)"><input type="number" placeholder="0" value={form.refacciones} onChange={e=>setForm(f=>({...f,refacciones:e.target.value}))}/></Field>
@@ -2070,6 +2073,8 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const [avOT,setAvOT]=useState('')
   const [mTxt,setMTxt]=useState('')
   const [nuevoMec,setNuevoMec]=useState('')
+  const [nuevoCosto,setNuevoCosto]=useState('')
+  const [nuevoExt,setNuevoExt]=useState(false)
   const FF0={mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2',requiere_refacciones:false,fecha_paro:'',causa:'Sin determinar'}
   const [fForm,setFForm]=useState(FF0)
   const [horasReales,setHorasReales]=useState('')
@@ -2106,7 +2111,9 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     const ok=await actualizarOT(finId,{estado:'Terminado',horas_reales:h,fin:finIso})
     if(ok&&ot&&setMtto&&!mtto.some(m=>m.ot_id===ot.id)){
       const seg=segmentosOT({...ot,estado:'Terminado',fin:finIso})
-      const row={fecha:finIso.slice(0,10),tractor_id:ot.tractor_id,tipo:ot.tipo,descripcion:ot.descripcion,tecnico:mecNombre(ot.mecanico_id),estado:'Completado',mano_obra:0,refacciones:0,observaciones:`Generado desde ${folioOT(ot.id)}. Captura los costos.`,fotos:[],causa:ot.causa||'Sin determinar',causa_detalle:ot.causa_detalle||null,ot_id:ot.id,dias_paro:seg.total!=null?Math.round(seg.total*10)/10:null,horas_reales:h}
+      const mec=mecanicos.find(m=>m.id===ot.mecanico_id)
+      const mo=mec&&!mec.externo&&Number(mec.costo_hora)>0?Math.round(h*Number(mec.costo_hora)*100)/100:0
+      const row={fecha:finIso.slice(0,10),tractor_id:ot.tractor_id,tipo:ot.tipo,descripcion:ot.descripcion,tecnico:mecNombre(ot.mecanico_id),proveedor:mec?.externo?mec.nombre:null,estado:'Completado',mano_obra:mo,refacciones:0,observaciones:`Generado desde ${folioOT(ot.id)}. ${mec?.externo?'Mecánico externo: captura el monto de la mano de obra y las refacciones.':mo>0?`Mano de obra: ${h} h × $${mec.costo_hora}/h. Captura las refacciones.`:'Captura los costos.'}`,fotos:[],causa:ot.causa||'Sin determinar',causa_detalle:ot.causa_detalle||null,ot_id:ot.id,dias_paro:seg.total!=null?Math.round(seg.total*10)/10:null,horas_reales:h}
       const {data:mm,error:em}=await supabase.from('mantenimientos').insert([row]).select()
       if(em)alert('La OT se terminó, pero no se pudo crear el registro en Mantenimiento: '+em.message)
       else if(mm&&mm[0])setMtto(x=>[mm[0],...x])
@@ -2144,14 +2151,19 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   }
   const agregarMecanico=async()=>{
     const n=nuevoMec.trim(); if(!n)return
-    const {data,error}=await supabase.from('mecanicos').insert([{nombre:n,activo:true}]).select()
+    const {data,error}=await supabase.from('mecanicos').insert([{nombre:n,activo:true,externo:!!nuevoExt,...(esAdmin&&nuevoCosto!==''?{costo_hora:Number(nuevoCosto)}:{})}]).select()
     if(error){alert('Error: '+error.message);return}
-    setMecanicos(m=>[...m,data[0]]);setNuevoMec('')
+    setMecanicos(m=>[...m,data[0]]);setNuevoMec('');setNuevoCosto('');setNuevoExt(false)
   }
   const toggleMecanico=async m=>{
     const {error}=await supabase.from('mecanicos').update({activo:m.activo===false}).eq('id',m.id)
     if(error){alert('Error: '+error.message);return}
     setMecanicos(ms=>ms.map(x=>x.id===m.id?{...x,activo:m.activo===false}:x))
+  }
+  const guardarMec=async(m,patch)=>{
+    const {error}=await supabase.from('mecanicos').update(patch).eq('id',m.id)
+    if(error){alert('Error: '+error.message);return}
+    setMecanicos(ms=>ms.map(x=>x.id===m.id?{...x,...patch}:x))
   }
   const elegirYo=v=>{setYo(v?Number(v):'');try{localStorage.setItem('flotilla_mec',v||'')}catch(e){}}
 
@@ -2497,10 +2509,17 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     {showMec&&<Modal title="Mecánicos del taller" onClose={()=>setShowMec(false)}>
       {mecanicos.length===0&&<p style={{fontSize:13,color:'var(--text3)'}}>Aún no hay mecánicos.</p>}
       {mecanicos.map(m=><div key={m.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'0.5px solid var(--border)',fontSize:13}}>
-        <span style={{opacity:m.activo===false?0.5:1}}>{m.nombre}{m.activo===false?' (inactivo)':''}</span>
+        <span style={{opacity:m.activo===false?0.5:1,flex:1}}>{m.nombre}{m.externo?' · externo':''}{m.activo===false?' (inactivo)':''}</span>
+        {esAdmin&&<span style={{display:'flex',alignItems:'center',gap:6,marginRight:8}}>
+          <label style={{fontSize:11,color:'var(--text3)',display:'flex',alignItems:'center',gap:3}}><input type="checkbox" checked={!!m.externo} onChange={e=>guardarMec(m,{externo:e.target.checked})}/>Externo</label>
+          {!m.externo&&<span style={{display:'flex',alignItems:'center',gap:3,fontSize:12}}>$<input type="number" min="0" step="0.5" placeholder="costo/h" defaultValue={m.costo_hora??''} onBlur={e=>{const v=e.target.value===''?null:Number(e.target.value);if(v!==(m.costo_hora??null))guardarMec(m,{costo_hora:v})}} style={{width:78,padding:'4px 6px',fontSize:12}}/>/h</span>}
+        </span>}
         <Btn small outline color="#888" onClick={()=>toggleMecanico(m)}>{m.activo===false?'Activar':'Desactivar'}</Btn></div>)}
-      <div style={{display:'flex',gap:8,marginTop:14}}>
-        <input type="text" placeholder="Nombre del mecánico" value={nuevoMec} onChange={e=>setNuevoMec(e.target.value)} onKeyDown={e=>e.key==='Enter'&&agregarMecanico()}/>
+      {esAdmin&&<p style={{fontSize:11,color:'var(--text3)',margin:'8px 0 0'}}>El costo por hora (solo sueldo) lo ves únicamente tú. Con él, al terminar una OT la mano de obra se calcula sola: horas reales × costo por hora. Para un mecánico externo marca "Externo" y captura el monto en Mantenimiento.</p>}
+      <div style={{display:'flex',gap:8,marginTop:14,flexWrap:'wrap',alignItems:'center'}}>
+        <input type="text" placeholder="Nombre del mecánico" value={nuevoMec} onChange={e=>setNuevoMec(e.target.value)} onKeyDown={e=>e.key==='Enter'&&agregarMecanico()} style={{flex:1,minWidth:160}}/>
+        <label style={{fontSize:12,display:'flex',alignItems:'center',gap:3}}><input type="checkbox" checked={nuevoExt} onChange={e=>setNuevoExt(e.target.checked)}/>Externo</label>
+        {esAdmin&&!nuevoExt&&<input type="number" min="0" step="0.5" placeholder="$ por hora" value={nuevoCosto} onChange={e=>setNuevoCosto(e.target.value)} style={{width:100}}/>}
         <Btn onClick={agregarMecanico}>Agregar</Btn></div>
     </Modal>}
 
