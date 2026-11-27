@@ -2086,6 +2086,24 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const mecNombre=id=>mecanicos.find(m=>m.id===id)?.nombre||'—'
   const mecsActivos=mecanicos.filter(m=>m.activo!==false)
   const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.estado!==ESPERA&&o.fecha>=a&&o.fecha<=b)}
+  /* Jornada 8 h/día (8:00–17:00 con 1 h de comida), lun–vie: una OT larga se reparte en los días siguientes */
+  const JORNADA=8
+  const reparto=(()=>{
+    const out={}, uso={}
+    const nextHab=d=>{while(d.getDay()===0||d.getDay()===6)d.setDate(d.getDate()+1);return d}
+    const ots=ordenes.filter(o=>o.estado!==ESPERA&&o.fecha&&o.mecanico_id).slice().sort((x,y)=>x.fecha<y.fecha?-1:x.fecha>y.fecha?1:x.id-y.id)
+    for(const o of ots){
+      let rest=Number(o.horas_estimadas)||1
+      const d=nextHab(new Date(o.fecha+'T12:00:00'))
+      let n=0, guard=0
+      while(rest>0.001&&guard++<60){
+        const k=o.mecanico_id+'|'+isoDate(d), libre=JORNADA-(uso[k]||0)
+        if(libre>0.001){const h=Math.min(libre,rest);uso[k]=(uso[k]||0)+h;rest-=h;n++;(out[k]=out[k]||[]).push({o,h,n})}
+        d.setDate(d.getDate()+1);nextHab(d)
+      }
+    }
+    return out
+  })()
   const puedeTrabajar=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'&&puedeProg
   const weekLabel=w=>{const a=addDaysD(thisMon,w*7),b=addDaysD(a,5);const f=d=>d.toLocaleDateString('es-MX',{day:'numeric',month:'short'});return f(a)+' – '+f(b)+(w===0?' (esta semana)':'')}
   const colorEstado=e=>e==='Terminado'?'#1D9E75':e==='En proceso'?'#BA7517':e==='No realizado'?'#A32D2D':'#378ADD'
@@ -2195,14 +2213,14 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
           <tbody>
             {mecsActivos.map(m=><tr key={m.id} style={{borderBottom:'0.5px solid var(--border)'}}>
               <td style={{padding:'8px 10px',fontWeight:600,verticalAlign:'top',minWidth:110}}>{m.nombre}
-                <div style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>{fmtHrs(lista.filter(o=>o.mecanico_id===m.id).reduce((s,o)=>s+Number(o.horas_estimadas||0),0))} prog.</div></td>
+                <div style={{fontSize:11,color:'var(--text3)',fontWeight:400}}>{fmtHrs(DIAS.reduce((s,_,i)=>s+(reparto[m.id+'|'+isoDate(addDaysD(mon,i))]||[]).reduce((q,x)=>q+x.h,0),0))} prog.</div></td>
               {DIAS.map((_,i)=>{
-                const f=isoDate(addDaysD(mon,i)), js=lista.filter(o=>o.mecanico_id===m.id&&o.fecha===f)
+                const f=isoDate(addDaysD(mon,i)), seg=reparto[m.id+'|'+f]||[], js=seg.map(x=>x.o)
                 return <td key={i} onClick={()=>{if(puedeProg&&js.length===0){setFForm({...FF0,mecanico_id:String(m.id),fecha:f,fecha_paro:aLocal(new Date().toISOString())});setNuevo({})}}}
                   style={{padding:5,verticalAlign:'top',minWidth:118,borderLeft:'0.5px solid var(--border)',background:f===hoy?'var(--bg2)':'transparent',cursor:puedeProg&&js.length===0?'pointer':'default'}}>
-                  {js.map(o=><button key={o.id} onClick={e=>{e.stopPropagation();setDetalleId(o.id)}} style={{display:'block',width:'100%',textAlign:'left',background:o.estado==='En proceso'?'#FAEEDA':'var(--bg)',border:'0.5px solid var(--border)',borderLeft:`4px solid ${colorEstado(o.estado)}`,borderRadius:6,padding:'4px 7px',marginBottom:4,cursor:'pointer',fontSize:12,color:'var(--text)'}}>
+                  {seg.map(({o,h,n})=><button key={o.id} onClick={e=>{e.stopPropagation();setDetalleId(o.id)}} style={{display:'block',width:'100%',textAlign:'left',background:o.estado==='En proceso'?'#FAEEDA':'var(--bg)',border:'0.5px solid var(--border)',borderLeft:`4px solid ${colorEstado(o.estado)}`,borderRadius:6,padding:'4px 7px',marginBottom:4,cursor:'pointer',fontSize:12,color:'var(--text)'}}>
                     <strong>{o.tractor_id}{o.tipo==='Correctivo'?' ⚠':''}</strong>
-                    <div style={{fontSize:10,color:'var(--text3)'}}>{folioOT(o.id)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>{folioOT(o.id)} · {fmtHrs(h)}{(n>1||Number(o.horas_estimadas)>JORNADA)?` · día ${n}`:''}</div>
                     <div style={{fontSize:11,color:'var(--text2)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{o.descripcion}</div>
                   </button>)}
                 </td>
