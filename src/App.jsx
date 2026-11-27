@@ -2086,11 +2086,11 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const mecNombre=id=>mecanicos.find(m=>m.id===id)?.nombre||'—'
   const mecsActivos=mecanicos.filter(m=>m.activo!==false)
   const ordenesSemana=w=>{const a=isoDate(addDaysD(thisMon,w*7)),b=isoDate(addDaysD(thisMon,w*7+6));return ordenes.filter(o=>o.estado!==ESPERA&&o.fecha>=a&&o.fecha<=b)}
-  /* Jornada 8 h/día (8:00–17:00 con 1 h de comida), lun–vie: una OT larga se reparte en los días siguientes */
+  /* Jornada 8 h/día (8:00–17:00 con 1 h de comida), lun–sáb: una OT larga se reparte en los días siguientes */
   const JORNADA=8
   const reparto=(()=>{
     const out={}, uso={}
-    const nextHab=d=>{while(d.getDay()===0||d.getDay()===6)d.setDate(d.getDate()+1);return d}
+    const nextHab=d=>{while(d.getDay()===0)d.setDate(d.getDate()+1);return d}
     const ots=ordenes.filter(o=>o.estado!==ESPERA&&o.fecha&&o.mecanico_id).slice().sort((x,y)=>x.fecha<y.fecha?-1:x.fecha>y.fecha?1:x.id-y.id)
     for(const o of ots){
       let rest=Number(o.horas_estimadas)||1
