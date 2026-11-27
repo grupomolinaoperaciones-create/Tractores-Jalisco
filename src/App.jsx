@@ -804,12 +804,12 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
   const [filterEstado,setFilterEstado]=useState('Todos')
   const [fotoPreviews,setFotoPreviews]=useState([])
   const [pendingFiles,setPendingFiles]=useState([])
-  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:'',causa:'Sin determinar',causa_detalle:'',proveedor:''}
+  const emptyForm={fecha:new Date().toISOString().split('T')[0],tractor_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'En proceso',observaciones:'',causa:'Sin determinar',causa_detalle:'',proveedor:'',requisicion_no:'',oc_no:''}
   const [form,setForm]=useState(emptyForm)
   const openNew=()=>{setEditId(null);setForm(emptyForm);setFotoPreviews([]);setPendingFiles([]);setShowForm(true)}
   const openEdit=(m)=>{
     setEditId(m.id)
-    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',causa:m.causa||'Sin determinar',causa_detalle:m.causa_detalle||'',proveedor:m.proveedor||''})
+    setForm({fecha:m.fecha,tractor_id:m.tractor_id,tipo:m.tipo,descripcion:m.descripcion,mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',causa:m.causa||'Sin determinar',causa_detalle:m.causa_detalle||'',proveedor:m.proveedor||'',requisicion_no:m.requisicion_no||'',oc_no:m.oc_no||''})
     setFotoPreviews(m.fotos||[])
     setPendingFiles([])
     setShowForm(true)
@@ -830,7 +830,7 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
     const uploadedUrls=pendingFiles.length>0?await uploadFotos(pendingFiles):[]
     const allFotos=[...existingUrls,...uploadedUrls]
     const esCorr=form.tipo!=='Preventivo'
-    const row={...form,proveedor:form.proveedor||null,causa:esCorr?form.causa:'Sin determinar',causa_detalle:esCorr&&form.causa==='Mala operación'?(form.causa_detalle||null):null,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
+    const row={...form,proveedor:form.proveedor||null,requisicion_no:form.requisicion_no.trim()||null,oc_no:form.oc_no.trim()||null,causa:esCorr?form.causa:'Sin determinar',causa_detalle:esCorr&&form.causa==='Mala operación'?(form.causa_detalle||null):null,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,fotos:allFotos}
     if(editId){
       const {error}=await supabase.from('mantenimientos').update(row).eq('id',editId)
       if(error){alert('Error: '+error.message)}
@@ -976,6 +976,10 @@ function Mantenimientos({mtto,setMtto,tractores,loading,puedeEditar=true}){
         <p style={{fontSize:11,color:'var(--text3)',margin:0}}>Un correctivo por mala operación sigue contando como correctivo; la causa solo permite analizarlo por separado.</p>
       </div>}
       <Field label="Descripción *"><textarea value={form.descripcion} rows={2} onChange={e=>setForm(f=>({...f,descripcion:e.target.value}))} style={{resize:'vertical'}}/></Field>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="No. de requisición"><input type="text" value={form.requisicion_no} onChange={e=>setForm(f=>({...f,requisicion_no:e.target.value}))}/></Field>
+        <Field label="No. de orden de compra"><input type="text" value={form.oc_no} onChange={e=>setForm(f=>({...f,oc_no:e.target.value}))}/></Field>
+      </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
         <Field label="Técnico"><input type="text" placeholder="Nombre del técnico" value={form.tecnico} onChange={e=>setForm(f=>({...f,tecnico:e.target.value}))}/></Field>
         <Field label="Proveedor / taller externo (si aplica)"><input type="text" placeholder="Si fue mano de obra externa" value={form.proveedor} onChange={e=>setForm(f=>({...f,proveedor:e.target.value}))}/></Field>
@@ -1893,11 +1897,11 @@ function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,lo
     const ok=await actualizar(envio.id,{estado:'Programado',mecanico_id:Number(envio.mecanico_id),fecha:envio.fecha||hoy,horas_estimadas:Number(envio.horas)||1})
     setSaving(false);if(ok)setEnvio(null)
   }
-  const [fN,setFN]=useState({tractor_id:'',descripcion:'',fecha_paro:'',causa:'Sin determinar'})
+  const [fN,setFN]=useState({tractor_id:'',descripcion:'',fecha_paro:'',causa:'Sin determinar',requisicion_no:'',oc_no:''})
   const crear=async()=>{
     if(!fN.tractor_id||!fN.descripcion.trim()){alert('Tractor y descripción son obligatorios');return}
     setSaving(true)
-    const row={tractor_id:fN.tractor_id,tipo:'Correctivo',descripcion:fN.descripcion.trim(),estado:ESPERA,requiere_refacciones:true,fecha_paro:deLocal(fN.fecha_paro)||new Date().toISOString(),causa:fN.causa,creado_por:nombre,horas_estimadas:2}
+    const row={tractor_id:fN.tractor_id,tipo:'Correctivo',descripcion:fN.descripcion.trim(),estado:ESPERA,requiere_refacciones:true,fecha_paro:deLocal(fN.fecha_paro)||new Date().toISOString(),causa:fN.causa,requisicion_no:fN.requisicion_no.trim()||null,oc_no:fN.oc_no.trim()||null,creado_por:nombre,horas_estimadas:2}
     const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
     setSaving(false)
     if(error){alert('Error: '+error.message);return}
@@ -1911,7 +1915,7 @@ function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,lo
   return <div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6,flexWrap:'wrap',gap:8}}>
       <h2 style={{fontSize:18,fontWeight:600,margin:0}}>⏳ En espera de refacciones</h2>
-      {puedeProg&&<Btn onClick={()=>{setFN({tractor_id:'',descripcion:'',fecha_paro:aLocal(new Date().toISOString()),causa:'Sin determinar'});setNuevo({})}}>+ Reportar paro</Btn>}
+      {puedeProg&&<Btn onClick={()=>{setFN({tractor_id:'',descripcion:'',fecha_paro:aLocal(new Date().toISOString()),causa:'Sin determinar',requisicion_no:'',oc_no:''});setNuevo({})}}>+ Reportar paro</Btn>}
     </div>
     <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 12px'}}>Tractores parados que esperan requisición, cotización, compra o entrega. Aquí el taller aún no se evalúa. Al llegar las refacciones se envían a <strong>Programación Taller</strong> con un mecánico asignado.</p>
     <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:14}}>
@@ -1931,6 +1935,7 @@ function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,lo
           <div style={{display:'flex',justifyContent:'space-between',gap:6}}><strong>{o.tractor_id}</strong><span style={{fontSize:11,color:'var(--text3)'}}>{folioOT(o.id)}</span></div>
           <div style={{fontSize:11,color:'var(--text3)'}}>{t?.campo||''}{o.causa&&o.causa!=='Sin determinar'?` · ${o.causa}`:''}</div>
           <p style={{fontSize:12,margin:'4px 0 6px'}}>{o.descripcion}</p>
+          {(o.requisicion_no||o.oc_no)&&<div style={{fontSize:11,color:'var(--text2)',marginBottom:4}}>{o.requisicion_no&&<span>Req. {o.requisicion_no}</span>}{o.requisicion_no&&o.oc_no&&' · '}{o.oc_no&&<span>OC {o.oc_no}</span>}</div>}
           <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}><Badge color="warning">En esta etapa {fmtDias(dEt)}</Badge><Badge color="danger">Parado {fmtDias(dTot)}</Badge></div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             {puedeProg&&<Btn small color={et.color} onClick={()=>avanzar(o,et)}>{et.btn}</Btn>}
@@ -1944,6 +1949,10 @@ function EsperaRefacciones({ordenes,setOrdenes,mecanicos,tractores,rol,nombre,lo
       <Field label="Tractor *"><select value={fN.tractor_id} onChange={e=>setFN(f=>({...f,tractor_id:e.target.value}))}><option value="">Seleccionar...</option>{tractores.map(t=><option key={t.id} value={t.id}>{t.id} · {t.campo}</option>)}</select></Field>
       <Field label="Falla / trabajo a realizar *"><input type="text" value={fN.descripcion} onChange={e=>setFN(f=>({...f,descripcion:e.target.value}))} placeholder="Ej. Falla de bomba hidráulica"/></Field>
       <Field label="Día y hora del paro"><input type="datetime-local" value={fN.fecha_paro} onChange={e=>setFN(f=>({...f,fecha_paro:e.target.value}))}/></Field>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="No. de requisición"><input type="text" value={fN.requisicion_no} onChange={e=>setFN(f=>({...f,requisicion_no:e.target.value}))}/></Field>
+        <Field label="No. de orden de compra"><input type="text" value={fN.oc_no} onChange={e=>setFN(f=>({...f,oc_no:e.target.value}))}/></Field>
+      </div>
       <Field label="Causa probable"><select value={fN.causa} onChange={e=>setFN(f=>({...f,causa:e.target.value}))}>{CAUSAS.map(c=><option key={c}>{c}</option>)}</select></Field>
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}><Btn outline color="#888" onClick={()=>setNuevo(null)}>Cancelar</Btn><Btn onClick={crear} disabled={saving}>{saving?'Guardando...':'Reportar paro'}</Btn></div>
     </Modal>}
@@ -2000,6 +2009,18 @@ const fmtDias=d=>d==null||isNaN(d)?'—':(Math.round(d*10)/10).toLocaleString('e
 const aLocal=s=>{if(!s)return '';const d=new Date(s);if(isNaN(d))return '';const z=new Date(d.getTime()-d.getTimezoneOffset()*6e4);return z.toISOString().slice(0,16)}
 const deLocal=v=>v?new Date(v).toISOString():null
 
+function RefsOT({o,edita,guardar}){
+  const [r,setR]=useState({requisicion_no:o.requisicion_no||'',oc_no:o.oc_no||''})
+  const cambio=(r.requisicion_no.trim()||null)!==(o.requisicion_no||null)||(r.oc_no.trim()||null)!==(o.oc_no||null)
+  return <div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
+    <h4 style={{fontSize:13,margin:'0 0 8px'}}>🧾 Requisición y orden de compra</h4>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+      <Field label="No. de requisición"><input type="text" disabled={!edita} value={r.requisicion_no} onChange={e=>setR(x=>({...x,requisicion_no:e.target.value}))}/></Field>
+      <Field label="No. de orden de compra"><input type="text" disabled={!edita} value={r.oc_no} onChange={e=>setR(x=>({...x,oc_no:e.target.value}))}/></Field>
+    </div>
+    {edita&&cambio&&<div style={{display:'flex',justifyContent:'flex-end'}}><Btn small outline color="#1D9E75" onClick={()=>guardar({requisicion_no:r.requisicion_no.trim()||null,oc_no:r.oc_no.trim()||null})}>Guardar</Btn></div>}
+  </div>
+}
 function PanelParo({o,puedeProg,esAdmin,nombre,guardar}){
   const [f,setF]=useState(()=>({requiere_refacciones:!!o.requiere_refacciones,fecha_paro:aLocal(o.fecha_paro),fecha_requisicion:aLocal(o.fecha_requisicion),fecha_cotizacion:aLocal(o.fecha_cotizacion),fecha_oc:aLocal(o.fecha_oc),fecha_llegada:aLocal(o.fecha_llegada)}))
   const [c,setC]=useState(()=>({causa:o.causa||'Sin determinar',causa_detalle:o.causa_detalle||''}))
@@ -2075,7 +2096,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const [nuevoMec,setNuevoMec]=useState('')
   const [nuevoCosto,setNuevoCosto]=useState('')
   const [nuevoExt,setNuevoExt]=useState(false)
-  const FF0={mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2',requiere_refacciones:false,fecha_paro:'',causa:'Sin determinar'}
+  const FF0={mecanico_id:'',tractor_id:'',tipo:'Correctivo',fecha:'',descripcion:'',horas_estimadas:'2',requiere_refacciones:false,fecha_paro:'',causa:'Sin determinar',requisicion_no:'',oc_no:''}
   const [fForm,setFForm]=useState(FF0)
   const [horasReales,setHorasReales]=useState('')
   const [repro,setRepro]=useState({fecha:'',mecanico_id:''})
@@ -2131,7 +2152,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
       const seg=segmentosOT({...ot,estado:'Terminado',fin:finIso})
       const mec=mecanicos.find(m=>m.id===ot.mecanico_id)
       const mo=mec&&!mec.externo&&Number(mec.costo_hora)>0?Math.round(h*Number(mec.costo_hora)*100)/100:0
-      const row={fecha:finIso.slice(0,10),tractor_id:ot.tractor_id,tipo:ot.tipo,descripcion:ot.descripcion,tecnico:mecNombre(ot.mecanico_id),proveedor:mec?.externo?mec.nombre:null,estado:'Completado',mano_obra:mo,refacciones:0,observaciones:`Generado desde ${folioOT(ot.id)}. ${mec?.externo?'Mecánico externo: captura el monto de la mano de obra y las refacciones.':mo>0?`Mano de obra: ${h} h × $${mec.costo_hora}/h. Captura las refacciones.`:'Captura los costos.'}`,fotos:[],causa:ot.causa||'Sin determinar',causa_detalle:ot.causa_detalle||null,ot_id:ot.id,dias_paro:seg.total!=null?Math.round(seg.total*10)/10:null,horas_reales:h}
+      const row={fecha:finIso.slice(0,10),tractor_id:ot.tractor_id,tipo:ot.tipo,descripcion:ot.descripcion,tecnico:mecNombre(ot.mecanico_id),proveedor:mec?.externo?mec.nombre:null,estado:'Completado',mano_obra:mo,refacciones:0,observaciones:`Generado desde ${folioOT(ot.id)}. ${mec?.externo?'Mecánico externo: captura el monto de la mano de obra y las refacciones.':mo>0?`Mano de obra: ${h} h × $${mec.costo_hora}/h. Captura las refacciones.`:'Captura los costos.'}`,fotos:[],causa:ot.causa||'Sin determinar',causa_detalle:ot.causa_detalle||null,requisicion_no:ot.requisicion_no||null,oc_no:ot.oc_no||null,ot_id:ot.id,dias_paro:seg.total!=null?Math.round(seg.total*10)/10:null,horas_reales:h}
       const {data:mm,error:em}=await supabase.from('mantenimientos').insert([row]).select()
       if(em)alert('La OT se terminó, pero no se pudo crear el registro en Mantenimiento: '+em.message)
       else if(mm&&mm[0])setMtto(x=>[mm[0],...x])
@@ -2148,7 +2169,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
     const espera=fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones
     if((!espera&&!fForm.mecanico_id)||!fForm.tractor_id||!fForm.descripcion.trim()){alert(espera?'Tractor y trabajo a realizar son obligatorios':'Mecánico, tractor y trabajo a realizar son obligatorios');return}
     setSaving(true)
-    const row={mecanico_id:fForm.mecanico_id?Number(fForm.mecanico_id):null,tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:espera?(fForm.fecha||null):(fForm.fecha||hoy),descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:espera?ESPERA:'Programado',creado_por:nombre,requiere_refacciones:fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones,fecha_paro:fForm.tipo==='Correctivo'?deLocal(fForm.fecha_paro):null,causa:'Sin determinar'}
+    const row={mecanico_id:fForm.mecanico_id?Number(fForm.mecanico_id):null,tractor_id:fForm.tractor_id,tipo:fForm.tipo,fecha:espera?(fForm.fecha||null):(fForm.fecha||hoy),descripcion:fForm.descripcion.trim(),horas_estimadas:Number(fForm.horas_estimadas)||1,estado:espera?ESPERA:'Programado',creado_por:nombre,requiere_refacciones:fForm.tipo==='Correctivo'&&!!fForm.requiere_refacciones,fecha_paro:fForm.tipo==='Correctivo'?deLocal(fForm.fecha_paro):null,causa:'Sin determinar',requisicion_no:(fForm.requisicion_no||'').trim()||null,oc_no:(fForm.oc_no||'').trim()||null}
     const {data,error}=await supabase.from('ordenes_trabajo').insert([row]).select()
     setSaving(false)
     if(error){alert('Error: '+error.message);return}
@@ -2476,6 +2497,10 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         <Field label="Día"><input type="date" value={fForm.fecha} onChange={e=>setFForm(f=>({...f,fecha:e.target.value}))}/></Field>
       </div>
       <Field label="Trabajo a realizar *"><input type="text" placeholder="Ej. Cambio de bomba hidráulica" value={fForm.descripcion} onChange={e=>setFForm(f=>({...f,descripcion:e.target.value}))}/></Field>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 12px'}}>
+        <Field label="No. de requisición"><input type="text" value={fForm.requisicion_no} onChange={e=>setFForm(f=>({...f,requisicion_no:e.target.value}))}/></Field>
+        <Field label="No. de orden de compra"><input type="text" value={fForm.oc_no} onChange={e=>setFForm(f=>({...f,oc_no:e.target.value}))}/></Field>
+      </div>
       <Field label="Horas estimadas"><input type="number" min="0.5" step="0.5" value={fForm.horas_estimadas} onChange={e=>setFForm(f=>({...f,horas_estimadas:e.target.value}))}/></Field>
       {fForm.tipo==='Correctivo'&&<div style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>
         <Field label="Día y hora del paro del tractor"><input type="datetime-local" value={fForm.fecha_paro} onChange={e=>setFForm(f=>({...f,fecha_paro:e.target.value}))}/></Field>
@@ -2501,6 +2526,7 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         <Field label="Agregar avance (solo administrador)"><textarea value={mTxt} onChange={e=>setMTxt(e.target.value)} style={{width:'100%',minHeight:60}}/></Field>
         <div style={{display:'flex',justifyContent:'flex-end'}}><Btn small outline color="#1D9E75" onClick={()=>guardarAvance(detalle.id,mTxt,()=>setMTxt(''))}>Guardar avance</Btn></div>
       </div>}
+      <RefsOT key={'r'+detalle.id} o={detalle} edita={puedeProg&&detalle.estado!=='Terminado'} guardar={patch=>actualizarOT(detalle.id,patch)}/>
       {(detalle.tipo==='Correctivo'||detalle.requiere_refacciones)&&<PanelParo key={detalle.id} o={detalle} puedeProg={puedeProg} esAdmin={esAdmin} nombre={nombre} guardar={patch=>actualizarOT(detalle.id,patch)}/>}
       {puedeProg&&detalle.estado!=='Terminado'&&<div style={{marginTop:14,borderTop:'0.5px solid var(--border)',paddingTop:12}}>
         <h4 style={{fontSize:13,margin:'0 0 8px'}}>Reprogramar</h4>
