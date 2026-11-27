@@ -2369,11 +2369,14 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
   const viewParos=()=>{
     const tcampo=Object.fromEntries(tractores.map(t=>[t.id,t.campo]))
     const NOW=Date.now()
+    const sigueParado=o=>o.estado!=='Terminado'&&o.estado!=='No realizado'
+    const fmtDMY=iso=>{if(!iso)return '—';const d=new Date(iso);return d.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'2-digit'})}
+    const tinfo=Object.fromEntries(tractores.map(t=>[t.id,t]))
     const base=[
       ...ordenes.filter(o=>o.fecha_paro&&o.tipo!=='Preventivo').map(o=>({o,tipoParo:'Falla',fp:o.fecha_paro,...segmentosOT(o,NOW)})),
       ...ordenes.filter(o=>o.tipo==='Preventivo'&&o.inicio).map(o=>{const fin=o.estado==='Terminado'&&o.fin?new Date(o.fin).getTime():NOW;return{o,tipoParo:'Programado',fp:o.inicio,segs:null,total:(fin-new Date(o.inicio).getTime())/DIA}})
     ]
-    const lista=base.filter(x=>(pf.tipo==='Todos'||x.tipoParo===pf.tipo)&&(pf.tractor==='Todos'||x.o.tractor_id===pf.tractor)&&(pf.campo==='Todos'||tcampo[x.o.tractor_id]===pf.campo)&&(!pf.desde||x.fp.slice(0,10)>=pf.desde)&&(!pf.hasta||x.fp.slice(0,10)<=pf.hasta)).sort((a,b)=>new Date(b.fp)-new Date(a.fp))
+    const lista=base.filter(x=>(pf.tipo==='Todos'||x.tipoParo===pf.tipo)&&(pf.tractor==='Todos'||x.o.tractor_id===pf.tractor)&&(pf.campo==='Todos'||tcampo[x.o.tractor_id]===pf.campo)&&((!pf.desde||x.fp.slice(0,10)>=pf.desde)&&(!pf.hasta||x.fp.slice(0,10)<=pf.hasta)||(sigueParado(x.o)&&(!pf.hasta||x.fp.slice(0,10)<=pf.hasta)))).sort((a,b)=>new Date(b.fp)-new Date(a.fp))
     const fallasL=lista.filter(x=>x.tipoParo==='Falla'), progL=lista.filter(x=>x.tipoParo==='Programado')
     const prom=i=>{const v=fallasL.map(x=>x.segs[i].dias).filter(d=>d!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
     const parados=lista.filter(x=>x.o.estado!=='Terminado'&&x.o.estado!=='No realizado')
@@ -2395,13 +2398,15 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
         <Stat label="Paro programado" value={fmtHrs(hrsProg)} sub={`${progL.length} preventivos · no cuentan como falla`} color="#7F77DD"/>
         {SEGS.map(([k,l],i)=><Stat key={k} label={l} value={fmtDias(prom(i))} sub="promedio" color={i===4?'#1D9E75':'#378ADD'}/>)}
       </div>
+      {(pf.desde||pf.hasta)&&<p style={{fontSize:12,color:'#BA7517',margin:'0 0 6px'}}>Con filtro de fechas también se muestran los tractores que siguen parados aunque su paro haya empezado antes (marcados "sigue parado").</p>}
       <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 8px'}}>Solo el último segmento (llegada → listo) se evalúa al taller y a los mecánicos. Los anteriores son tiempos de gestión: requisición, cotización, compra y entrega.</p>
       {lista.length===0?<EmptyState msg="Aún no hay paros con esos filtros. Las fallas se registran con la fecha de paro de la OT correctiva; los preventivos, al iniciar y terminar el trabajo."/>:
       <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['OT','Tractor','Tipo de paro','Causa','Estado',...SEGS.map(x=>x[1]),'Total parado'].map(h=><th key={h} style={{padding:'9px 8px',textAlign:'left',color:'var(--text2)',fontWeight:500}}>{h}</th>)}</tr></thead>
-          <tbody>{lista.map(({o,segs,total,tipoParo})=><tr key={o.id} onClick={()=>setDetalleId(o.id)} style={{borderBottom:'0.5px solid var(--border)',cursor:'pointer'}}>
+          <thead><tr style={{borderBottom:'0.5px solid var(--border)'}}>{['OT','Tractor','Fecha de paro','Tipo de paro','Causa','Estado',...SEGS.map(x=>x[1]),'Total parado'].map(h=><th key={h} style={{padding:'9px 8px',textAlign:'left',color:'var(--text2)',fontWeight:500}}>{h}</th>)}</tr></thead>
+          <tbody>{lista.map(({o,segs,total,tipoParo,fp})=><tr key={o.id} onClick={()=>setDetalleId(o.id)} style={{borderBottom:'0.5px solid var(--border)',cursor:'pointer'}}>
             <td style={{padding:'7px 8px',fontWeight:600}}>{folioOT(o.id)}</td><td style={{padding:'7px 8px'}}>{o.tractor_id}</td>
+            <td style={{padding:'7px 8px',whiteSpace:'nowrap'}}>{fmtDMY(fp)}{((pf.desde&&fp.slice(0,10)<pf.desde)||(pf.hasta&&fp.slice(0,10)>pf.hasta))&&<div style={{fontSize:10,color:'#BA7517'}}>sigue parado</div>}</td>
             <td style={{padding:'7px 8px'}}><Badge color={tipoParo==='Falla'?'danger':'purple'}>{tipoParo==='Falla'?'Falla':'Programado'}</Badge></td>
             <td style={{padding:'7px 8px'}}>{tipoParo==='Falla'?(o.causa||'Sin determinar'):'—'}</td>
             <td style={{padding:'7px 8px'}}><Badge color={badgeEstado(o.estado)}>{o.estado}</Badge></td>
@@ -2410,6 +2415,38 @@ function ProgramacionTaller({mecanicos,setMecanicos,ordenes,setOrdenes,avances,s
             <td style={{padding:'7px 8px',fontWeight:700,color:tipoParo==='Falla'?'#993C1D':'#534AB7'}}>{tipoParo==='Falla'?fmtDias(total):fmtHrs(total*24)}</td></tr>)}</tbody>
         </table>
       </div>}
+      {(()=>{
+        const mecs=Object.fromEntries(mecanicos.map(m=>[m.id,m]))
+        const filas=lista.map(({o,fp,total})=>{
+          const t=tinfo[o.tractor_id]||{}
+          const cerr=o.estado==='Terminado'||o.estado==='No realizado'
+          const salida=cerr?(o.fin?fmtDMY(o.fin):'—'):o.estado===ESPERA?'EN ESPERA DE REFACCIONES':mecs[o.mecanico_id]?.externo?'TALLER EXTERNO':o.estado==='En proceso'?'EN REPARACIÓN':'EN TALLER GENERAL'
+          const d=Math.max(0,Math.round(total||0))
+          return {o,tractor:o.tractor_id,ingreso:fmtDMY(fp),salida,abierto:!cerr,dias:d+(d===1?' DÍA':' DÍAS'),campo:t.campo||'',modelo:t.modelo||'',marca:t.marca||''}
+        }).sort((a,b)=>(b.abierto-a.abierto))
+        const exportar=async()=>{
+          const XLSX=await import('xlsx')
+          const ws=XLSX.utils.aoa_to_sheet([['TRACTORES CON INGRESOS, PERMANENCIA Y/O SALIDA DE TALLER'],['TRACTOR','FECHA DE INGRESO','FECHA DE SALIDA','DÍAS INACTIVO','CAMPO','MODELO','MARCA'],...filas.map(f=>[f.tractor,f.ingreso,f.salida,f.dias,f.campo,f.modelo,f.marca])])
+          const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Ingresos a taller');XLSX.writeFile(wb,'Tractores_ingresos_taller.xlsx')
+        }
+        return <div style={{marginTop:22}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:8}}>
+            <h3 style={{fontSize:15,margin:0}}>Tractores con ingresos, permanencia y/o salida de taller</h3>
+            <Btn small outline color="#1D9E75" onClick={exportar}>⬇ Excel</Btn>
+          </div>
+          <p style={{fontSize:12,color:'var(--text3)',margin:'0 0 8px'}}>Se arma sola con las OT y respeta los filtros de arriba. Los que siguen en taller aparecen primero.</p>
+          {filas.length===0?<EmptyState msg="Sin tractores en taller con esos filtros."/>:
+          <div style={{overflowX:'auto',border:'0.5px solid var(--border)',borderRadius:12,background:'var(--bg)'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <thead><tr style={{background:'#FAC82E'}}>{['TRACTOR','FECHA DE INGRESO','FECHA DE SALIDA','DÍAS INACTIVO','CAMPO','MODELO','MARCA'].map(h=><th key={h} style={{padding:'8px',textAlign:'left',fontWeight:700,color:'#222'}}>{h}</th>)}</tr></thead>
+              <tbody>{filas.map(f=><tr key={f.o.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+                <td style={{padding:'6px 8px',fontWeight:600}}>{f.tractor}</td><td style={{padding:'6px 8px'}}>{f.ingreso}</td>
+                <td style={{padding:'6px 8px',fontWeight:f.abierto?600:400,color:f.abierto?'#A32D2D':'inherit'}}>{f.salida}</td>
+                <td style={{padding:'6px 8px'}}>{f.dias}</td><td style={{padding:'6px 8px'}}>{f.campo}</td><td style={{padding:'6px 8px'}}>{f.modelo}</td><td style={{padding:'6px 8px'}}>{f.marca}</td></tr>)}</tbody>
+            </table>
+          </div>}
+        </div>
+      })()}
     </div>
   }
 
